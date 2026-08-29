@@ -55,7 +55,8 @@ gofly -url=jdbc:postgresql://localhost:5432/mydb \
 ```
 
 Commands: `migrate`, `undo`, `info`, `validate`, `baseline`, `repair`.
-Run `gofly` with no arguments for the full list of options.
+Run `gofly` with no arguments for the full list of options, or see
+**[docs/cli.md](docs/cli.md)**.
 
 ```
 $ gofly -url=jdbc:sqlite:app.db -locations=filesystem:./sql info
@@ -73,29 +74,23 @@ Schema version: 3
 
 ### Configuration
 
-Settings come from four places, each overriding the one before it:
-
-1. built-in defaults, which are Flyway's defaults
-2. config files: `-configFiles=a.conf,b.conf`, or `gofly.conf` / `flyway.conf`
-   picked up from the working directory and the home directory
-3. environment: `FLYWAY_URL`, `GOFLY_URL`, `FLYWAY_SQL_MIGRATION_SEPARATOR`,
-   `FLYWAY_PLACEHOLDERS_MYKEY` …
-4. the command line: `-url=…`
-
-Config files use the Flyway properties syntax, and an existing `flyway.conf`
-works unchanged:
+Settings come from four places, each overriding the one before it: built-in
+defaults, config files, environment variables, then the command line. Full
+details in **[docs/configuration.md](docs/configuration.md)**.
 
 ```properties
-flyway.url=jdbc:mysql://db:3306/artypistdb
-flyway.user=root
-flyway.password=secret
-flyway.locations=filesystem:./setup/sql/artypist/db
-flyway.sqlMigrationSeparator=_
-flyway.baselineVersion=10
+gofly.url=jdbc:mysql://db:3306/artypistdb
+gofly.user=root
+gofly.password=secret
+gofly.locations=filesystem:./setup/sql/artypist/db
+gofly.sqlMigrationSeparator=_
+gofly.baselineVersion=10
 ```
 
-Keys may be written bare (`url`), with the Flyway prefix (`flyway.url`) or with
-the gofly one (`gofly.url`).
+An existing `flyway.conf` works unchanged: the `flyway.*` properties and the
+`FLYWAY_*` environment variables are still read. They warn that `gofly.*` is
+the name to move to, and the two namespaces cannot be mixed — a half-renamed
+configuration is one nobody can reason about.
 
 ### Database urls
 
@@ -124,6 +119,14 @@ first run gofly:
 `flyway_schema_history` is only ever read, never written to and never dropped,
 so going back to Flyway stays possible. Pass `-importFromFlyway=false` to skip
 the import.
+
+`info` and `validate` never import anything. On a database gofly has not taken
+over yet they read `flyway_schema_history` directly and say so, so you can check
+compatibility before committing to the switch:
+
+```sh
+gofly -url=... -locations=filesystem:./sql validate
+```
 
 Because the checksums are identical, a migration that was edited after Flyway
 applied it still fails validation afterwards. The import moves the history
@@ -163,24 +166,53 @@ pretending otherwise.
 
 The point is a small tool that does the essentials well, so a number of Flyway
 features are out of scope: Java and script migrations, callbacks, cherry-pick,
-dry runs, `flyway.ignoreMigrationPatterns`, and every database beyond the four
+dry runs, `ignoreMigrationPatterns`, locking, and every database beyond the four
 listed above.
 
 `clean` is not implemented. Wiping a schema is not a migration, and each of
 these databases already has a better tool for it.
+
+The full list, with the reasoning, is in
+**[docs/compatibility.md](docs/compatibility.md#deliberately-left-out)**.
+
+## Documentation
+
+- **[docs/cli.md](docs/cli.md)** — the commands and every option
+- **[docs/configuration.md](docs/configuration.md)** — config files, environment, namespaces
+- **[docs/migrations.md](docs/migrations.md)** — naming, versions, checksums, transactions
+- **[docs/compatibility.md](docs/compatibility.md)** — what matches Flyway, what does not, what is left out
 
 ## Development
 
 ```sh
 make test              # the unit and sqlite tests
 make test-coverage     # ... with a coverage report
+make test-e2e          # compare against real Flyway on all four databases
 make test-integration  # brings up postgres, mysql and sql server in docker
 make lint              # gofmt and go vet
+make db-down           # stop the throwaway containers
 ```
 
-The integration tests are behind the `integration` build tag and only run
-against the databases whose url is exported. See `lib/integration_test.go`.
+`make test-e2e` is the one that matters. It runs the same migrations twice
+against each engine, once with real Flyway in a container and once with gofly,
+and compares the schema history tables row by row. If gofly ever drifts away
+from Flyway, that suite fails with a side by side diff. See
+**[test/e2e/README.md](test/e2e/README.md)**.
+
+## Releases
+
+Pushing to `master` runs the tests, the compatibility suite and a cross
+compile, keeping the binaries as build artifacts. Publishing a GitHub release
+is always a manual decision:
+
+```sh
+make release VERSION=v0.2.0
+```
+
+or run the Release workflow from the Actions tab. Either way it re-runs
+everything, then uploads binaries for Linux, macOS and Windows on x86-64 and
+ARM64, with a `SHA256SUMS` file.
 
 ## Licence
 
-Apache 2.0, the same licence Flyway's community edition uses.
+MIT License. See [LICENSE](LICENSE).

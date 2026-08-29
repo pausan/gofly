@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.22"
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^tmp-' || true)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'ed:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./lib/
+          go vet -tags e2e ./test/e2e/
+
+      - name: Test
+        run: go test ./... -count=1 -coverprofile=coverage.out
+
+      - name: Coverage
+        run: go tool cover -func=coverage.out | tail -1
+
+  compatibility:
+    name: Flyway compatibility (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    # the whole point of this project is that gofly and Flyway agree, so the
+    # comparison runs on every push rather than on a schedule
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres, mysql, mssql]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Pull the Flyway image
+        run: docker pull flyway/flyway:10
+
+      - name: Start the database
+        if: matrix.database != 'sqlite'
+        run: make db-up-${{ matrix.database }}
+
+      - name: Compare against Flyway
+        run: make test-e2e-${{ matrix.database }}
+
+      - name: Stop the database
+        if: always() && matrix.database != 'sqlite'
+        run: make db-down || true
+
+  build:
+    name: Build the release binaries
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Cross compile
+        run: make build-all
+
+      # kept as build artifacts only. Publishing a GitHub release is a manual
+      # decision, see the release workflow.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gofly-binaries
+          path: build/
+          retention-days: 14

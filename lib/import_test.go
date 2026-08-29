@@ -266,3 +266,151 @@ func mustExec(t *testing.T, dbPath string, statement string) {
 		t.Fatalf("cannot run %q: %v", statement, err)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestValidateReadsTheFlywayHistoryWhenGoflyHasNoneYet
+//
+// Running validate against a database still managed by Flyway must check the
+// files against the history that is actually there, and must not create the
+// gofly table or import anything: validating is a read-only question.
+// -----------------------------------------------------------------------------
+func TestValidateReadsTheFlywayHistoryWhenGoflyHasNoneYet(t *testing.T) {
+	setup := newTestSetup(t)
+
+	firstSQL := "CREATE TABLE a (id INT);\n"
+	setup.write("V1__a.sql", firstSQL)
+
+	setup.createFlywayHistory([]string{
+		flywayRow(1, "1", "a", "V1__a.sql", ChecksumString(firstSQL)),
+	})
+
+	gofly := setup.open()
+	defer gofly.Close()
+
+	result, err := gofly.Validate()
+	if err != nil {
+		t.Fatalf("validate failed: %v", err)
+	}
+	if !result.Valid() {
+		t.Errorf("V1 is applied according to the flyway history, so it should validate: %v", result.Error())
+	}
+
+	if setup.tableExists(DefaultGoflyTable) {
+		t.Error("validate must not create the gofly history table")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestValidateAgainstTheFlywayHistoryStillCatchesAnEditedMigration
+// -----------------------------------------------------------------------------
+func TestValidateAgainstTheFlywayHistoryStillCatchesAnEditedMigration(t *testing.T) {
+	setup := newTestSetup(t)
+	setup.write("V1__a.sql", "CREATE TABLE a (id INT);\n")
+
+	setup.createFlywayHistory([]string{
+		flywayRow(1, "1", "a", "V1__a.sql", 999999),
+	})
+
+	gofly := setup.open()
+	defer gofly.Close()
+
+	result, err := gofly.Validate()
+	if err != nil {
+		t.Fatalf("validate failed: %v", err)
+	}
+	if result.Valid() {
+		t.Fatal("the checksum does not match, validation should have failed")
+	}
+	if result.Errors[0].Code != ErrorChecksumMismatch {
+		t.Errorf("got %s, want a checksum mismatch", result.Errors[0].Code)
+	}
+	if setup.tableExists(DefaultGoflyTable) {
+		t.Error("validate must not create the gofly history table")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestInfoReportsTheFlywayHistoryWhenGoflyHasNoneYet
+// -----------------------------------------------------------------------------
+func TestInfoReportsTheFlywayHistoryWhenGoflyHasNoneYet(t *testing.T) {
+	setup := newTestSetup(t)
+
+	firstSQL := "CREATE TABLE a (id INT);\n"
+	setup.write("V1__a.sql", firstSQL)
+	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
+
+	setup.createFlywayHistory([]string{
+		flywayRow(1, "1", "a", "V1__a.sql", ChecksumString(firstSQL)),
+	})
+
+	gofly := setup.open()
+	defer gofly.Close()
+
+	info, source, err := gofly.InfoWithSource()
+	if err != nil {
+		t.Fatalf("info failed: %v", err)
+	}
+	if source != HistorySourceFlyway {
+		t.Errorf("the info came from source %v, want the flyway table", source)
+	}
+	if info.Current.String() != "1" {
+		t.Errorf("the current version is %s, want 1", info.Current)
+	}
+	if len(info.Pending()) != 1 {
+		t.Errorf("got %d pending migrations, want only V2", len(info.Pending()))
+	}
+	if setup.tableExists(DefaultGoflyTable) {
+		t.Error("info must not create the gofly history table")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestValidateOnAVirginDatabaseReportsPendingMigrations
+// -----------------------------------------------------------------------------
+func TestValidateOnAVirginDatabaseReportsPendingMigrations(t *testing.T) {
+	setup := newTestSetup(t)
+	setup.write("V1__a.sql", "CREATE TABLE a (id INT);\n")
+
+	gofly := setup.open()
+	defer gofly.Close()
+
+	result, err := gofly.Validate()
+	if err != nil {
+		t.Fatalf("validate failed: %v", err)
+	}
+	if result.Valid() {
+		t.Error("nothing is applied, so V1 should be reported as not applied")
+	}
+	if setup.tableExists(DefaultGoflyTable) {
+		t.Error("validate must not create the gofly history table")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestMigrateStillTakesOverAfterAReadOnlyValidate
+// -----------------------------------------------------------------------------
+func TestMigrateStillTakesOverAfterAReadOnlyValidate(t *testing.T) {
+	setup := newTestSetup(t)
+
+	firstSQL := "CREATE TABLE a (id INT);\n"
+	setup.write("V1__a.sql", firstSQL)
+	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
+	setup.createFlywayHistory([]string{
+		flywayRow(1, "1", "a", "V1__a.sql", ChecksumString(firstSQL)),
+	})
+	mustExec(t, setup.dbPath, "CREATE TABLE a (id INT)")
+
+	gofly := setup.open()
+	if _, err := gofly.Validate(); err != nil {
+		t.Fatalf("validate failed: %v", err)
+	}
+	gofly.Close()
+
+	result := setup.mustMigrate()
+	if result.MigrationsExecuted != 1 {
+		t.Errorf("applied %d migrations, want only V2", result.MigrationsExecuted)
+	}
+	if len(setup.history()) != 2 {
+		t.Error("migrate should have imported the flyway row and added V2")
+	}
+}

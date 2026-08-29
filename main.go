@@ -56,6 +56,10 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "gofly %s\n\n", Version)
 	}
 
+	for _, warning := range config.Warnings {
+		fmt.Fprintf(stderr, "WARNING: %s\n", warning)
+	}
+
 	gofly, err := lib.New(config)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %s\n", err)
@@ -89,9 +93,13 @@ func runCommand(gofly *lib.Gofly, command string, stdout io.Writer) error {
 		return err
 
 	case "info":
-		info, err := gofly.Info()
+		info, source, err := gofly.InfoWithSource()
 		if err != nil {
 			return err
+		}
+		if source == lib.HistorySourceFlyway {
+			fmt.Fprintf(stdout, "Reading the existing %s: gofly has not taken over this database yet\n\n",
+				gofly.Config.FlywayTable)
 		}
 		fmt.Fprintf(stdout, "Schema version: %s\n\n", info.Current)
 		fmt.Fprint(stdout, lib.DumpInfoTable(info))

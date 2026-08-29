@@ -196,6 +196,47 @@ func (s *testSetup) info() *MigrationInfoService {
 }
 
 // -----------------------------------------------------------------------------
+// insertFailedRow
+//
+// Plants a failed migration in the history, the way an engine that cannot roll
+// DDL back would leave one behind. SQLite can roll everything back, so this is
+// the only way to reach that state in these tests.
+// -----------------------------------------------------------------------------
+func (s *testSetup) insertFailedRow(version string, description string, script string) {
+	s.t.Helper()
+
+	gofly := s.open()
+	defer gofly.Close()
+
+	rank, err := gofly.History.NextInstalledRank()
+	if err != nil {
+		s.t.Fatalf("cannot work out the next rank: %v", err)
+	}
+
+	parsed, parseErr := NewVersion(version)
+	if parseErr != nil {
+		s.t.Fatalf("cannot parse version %q: %v", version, parseErr)
+	}
+
+	checksum := int32(0)
+	row := &AppliedMigration{
+		InstalledRank: rank,
+		Version:       parsed,
+		Description:   description,
+		Type:          MigrationTypeSQL,
+		Script:        script,
+		Checksum:      &checksum,
+		InstalledBy:   "test",
+		ExecutionTime: 1,
+		Success:       false,
+	}
+
+	if err := gofly.History.Insert(gofly.Connection.DB(), row); err != nil {
+		s.t.Fatalf("cannot plant the failed row: %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
 // TestMigrateAppliesPendingMigrations
 // -----------------------------------------------------------------------------
 func TestMigrateAppliesPendingMigrations(t *testing.T) {
@@ -535,18 +576,22 @@ func TestRepeatableMigrationIsReappliedWhenItChanges(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// TestMigrateWithoutGroupRecordsTheFailure
+// TestMigrateWithoutGroupKeepsWhatAlreadySucceeded
 //
 // The default is one transaction per migration, so a failure leaves everything
-// before it applied and a failed row behind.
+// before it applied and rolls back only the migration that broke.
+//
+// On an engine that can roll DDL back there is deliberately no failed row: the
+// changes are gone, so there is nothing to repair, and Flyway behaves the same
+// way (DbMigrate only records the failure when supportsDdlTransactions() is
+// false). The migration simply stays pending and is retried.
 // -----------------------------------------------------------------------------
-func TestMigrateWithoutGroupRecordsTheFailure(t *testing.T) {
+func TestMigrateWithoutGroupKeepsWhatAlreadySucceeded(t *testing.T) {
 	setup := newTestSetup(t)
 	setup.write("V1__a.sql", "CREATE TABLE a (id INT);\n")
 	setup.write("V2__b.sql", "THIS IS NOT SQL;\n")
 
-	_, err := setup.migrate()
-	if err == nil {
+	if _, err := setup.migrate(); err == nil {
 		t.Fatal("migrate should have failed")
 	}
 
@@ -555,15 +600,40 @@ func TestMigrateWithoutGroupRecordsTheFailure(t *testing.T) {
 	}
 
 	rows := setup.history()
-	if len(rows) != 2 {
-		t.Fatalf("the history holds %d rows, want 2", len(rows))
+	if len(rows) != 1 {
+		t.Fatalf("the history holds %d rows, want only the successful V1", len(rows))
 	}
-	if rows[1].Success {
-		t.Error("V2 must be recorded as failed")
+	if !rows[0].Success || rows[0].Version.String() != "1" {
+		t.Errorf("the recorded row is %+v", rows[0])
 	}
 
-	// and the next run refuses to touch anything until it is repaired
-	_, err = setup.migrate()
+	// V2 is still pending, so fixing it and running again just works
+	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
+	result := setup.mustMigrate()
+	if result.MigrationsExecuted != 1 {
+		t.Errorf("applied %d migrations, want the fixed V2", result.MigrationsExecuted)
+	}
+	if !setup.tableExists("b") {
+		t.Error("the fixed V2 was not applied")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestAFailedRowBlocksTheNextRun
+//
+// Where the DDL could not be rolled back, the failed row stays behind and has
+// to stop everything until someone repairs it.
+// -----------------------------------------------------------------------------
+func TestAFailedRowBlocksTheNextRun(t *testing.T) {
+	setup := newTestSetup(t)
+	setup.write("V1__a.sql", "CREATE TABLE a (id INT);\n")
+	setup.mustMigrate()
+
+	// V2 arrives and fails on an engine that cannot roll the DDL back
+	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
+	setup.insertFailedRow("2", "b", "V2__b.sql")
+
+	_, err := setup.migrate()
 	if err == nil || !strings.Contains(err.Error(), "Detected failed migration") {
 		t.Errorf("expected the failed migration to block the next run, got %v", err)
 	}

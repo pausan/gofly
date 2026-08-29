@@ -135,9 +135,12 @@ func (h *SchemaHistory) Insert(executor sqlExecutor, migration *AppliedMigration
 	statement := "INSERT INTO " + h.QualifiedName() + " (" + h.columnListForInsert() + ") VALUES (" +
 		strings.Join(placeholders, ", ") + ")"
 
+	// Flyway stores MigrationVersion.toString(), which is the normalized text:
+	// V1_2__x.sql is recorded as 1.2, not 1_2. Storing the raw spelling instead
+	// would make the two tools disagree on the version column.
 	var version interface{}
 	if migration.Version != nil && !migration.Version.IsPredefined() {
-		version = migration.Version.RawVersion()
+		version = migration.Version.String()
 	}
 
 	var checksum interface{}

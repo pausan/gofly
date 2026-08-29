@@ -139,42 +139,128 @@ func (g *Gofly) EnsureHistory() error {
 	return nil
 }
 
+// HistorySource says which table an info or validate run read from
+type HistorySource int
+
+const (
+	// HistorySourceNone means neither gofly nor Flyway has a history here yet
+	HistorySourceNone HistorySource = iota
+
+	// HistorySourceGofly means gofly's own table was read
+	HistorySourceGofly
+
+	// HistorySourceFlyway means gofly has no table here yet and the existing
+	// Flyway one was read instead, without touching it
+	HistorySourceFlyway
+)
+
 // -----------------------------------------------------------------------------
 // Info
 //
-// Returns the current picture of the database.
+// Returns the current picture of the database. This never creates or modifies
+// anything: on a database gofly has not taken over yet it reads the existing
+// Flyway history instead, so that info and validate can report on it without
+// committing to the migration.
 // -----------------------------------------------------------------------------
 func (g *Gofly) Info() (*MigrationInfoService, error) {
+	service, _, err := g.InfoWithSource()
+
+	return service, err
+}
+
+// -----------------------------------------------------------------------------
+// InfoWithSource
+//
+// Same as Info, and also says which history table the answer came from.
+// -----------------------------------------------------------------------------
+func (g *Gofly) InfoWithSource() (*MigrationInfoService, HistorySource, error) {
 	resolved, err := ResolveMigrations(g.Config)
 	if err != nil {
-		return nil, err
+		return nil, HistorySourceNone, err
 	}
 
-	applied := []*AppliedMigration{}
+	applied, source, err := g.readHistory()
+	if err != nil {
+		return nil, HistorySourceNone, err
+	}
 
+	service, err := BuildMigrationInfo(g.Config, resolved, applied)
+
+	return service, source, err
+}
+
+// -----------------------------------------------------------------------------
+// readHistory
+//
+// Reads the schema history without creating anything.
+//
+// Once gofly owns a database its own table is the only truth. Before that, an
+// existing flyway_schema_history is read as is, so that `validate` on a
+// database still managed by Flyway checks the migrations against the history
+// that is actually there rather than reporting every one of them as pending.
+// -----------------------------------------------------------------------------
+func (g *Gofly) readHistory() ([]*AppliedMigration, HistorySource, error) {
 	exists, err := g.History.Exists()
 	if err != nil {
-		return nil, err
+		return nil, HistorySourceNone, err
 	}
 	if exists {
-		applied, err = g.History.All()
-		if err != nil {
-			return nil, err
-		}
+		applied, err := g.History.All()
+		return applied, HistorySourceGofly, err
 	}
 
-	return BuildMigrationInfo(g.Config, resolved, applied)
+	flywayHistory, exists, err := g.flywayHistory()
+	if err != nil {
+		return nil, HistorySourceNone, err
+	}
+	if !exists {
+		return []*AppliedMigration{}, HistorySourceNone, nil
+	}
+
+	applied, err := flywayHistory.All()
+
+	return applied, HistorySourceFlyway, err
+}
+
+// -----------------------------------------------------------------------------
+// flywayHistory
+//
+// Returns a read-only handle on the Flyway history table, if there is one.
+// -----------------------------------------------------------------------------
+func (g *Gofly) flywayHistory() (*SchemaHistory, bool, error) {
+	if g.Config.FlywayTable == "" {
+		return nil, false, nil
+	}
+
+	schema := g.defaultSchema
+	if !g.Connection.Dialect().SupportsSchemas() {
+		schema = ""
+	}
+
+	exists, err := g.Connection.Dialect().TableExists(g.Connection.DB(), schema, g.Config.FlywayTable)
+	if err != nil || !exists {
+		return nil, false, err
+	}
+
+	return NewSchemaHistory(g.Connection, schema, g.Config.FlywayTable, g.Config.ResolveInstalledBy()), true, nil
 }
 
 // -----------------------------------------------------------------------------
 // Validate
 //
-// Runs the validation on its own, the way the `validate` command does.
+// Runs the validation on its own, the way the `validate` command does. Nothing
+// is created or migrated: on a database still managed by Flyway the files are
+// checked against the existing flyway_schema_history.
 // -----------------------------------------------------------------------------
 func (g *Gofly) Validate() (*ValidateResult, error) {
-	info, err := g.Info()
+	info, source, err := g.InfoWithSource()
 	if err != nil {
 		return nil, err
+	}
+
+	if source == HistorySourceFlyway {
+		g.logf("%s does not exist yet, validating against the existing %s instead",
+			g.History.QualifiedName(), g.Config.FlywayTable)
 	}
 
 	return info.Validate(ValidateContext{
@@ -317,10 +403,7 @@ func (g *Gofly) migrateOneByOne(pending []*MigrationInfo, rank int, result *Migr
 		if execErr != nil {
 			transaction.Rollback()
 
-			// the failure itself is worth recording, so that validate and
-			// repair can see it afterwards
-			failed := g.appliedRowFor(migration, rank, elapsed, false)
-			if err := g.History.Insert(g.Connection.DB(), failed); err != nil {
+			if err := g.recordFailure(migration, rank, elapsed); err != nil {
 				return errors.Join(g.migrationError(migration, execErr), err)
 			}
 
@@ -400,6 +483,29 @@ func (g *Gofly) appliedRowFor(migration *ResolvedMigration, rank int, elapsed in
 		ExecutionTime: elapsed,
 		Success:       success,
 	}
+}
+
+// -----------------------------------------------------------------------------
+// recordFailure
+//
+// Writes the failed migration into the history, but only where the database
+// could not roll the changes back on its own.
+//
+// This is what Flyway does (DbMigrate: the row is added in the `else` branch of
+// `supportsDdlTransactions()`), and the reasoning is sound: when everything was
+// rolled back there is nothing left to repair, and a leftover failed row would
+// block the next run over changes that no longer exist. Where DDL commits
+// implicitly, half the migration is still there and the row is the only record
+// of it.
+// -----------------------------------------------------------------------------
+func (g *Gofly) recordFailure(migration *ResolvedMigration, rank int, elapsed int) error {
+	if g.Connection.Dialect().SupportsDDLTransactions() {
+		return nil
+	}
+
+	// the insert goes through the connection rather than the rolled back
+	// transaction, which is the only way it can survive
+	return g.History.Insert(g.Connection.DB(), g.appliedRowFor(migration, rank, elapsed, false))
 }
 
 // -----------------------------------------------------------------------------
@@ -560,8 +666,7 @@ func (g *Gofly) undoOneByOne(resolved *ResolvedMigrations, toUndo []*MigrationIn
 		if execErr != nil {
 			transaction.Rollback()
 
-			failed := g.appliedRowFor(undo, rank, elapsed, false)
-			if err := g.History.Insert(g.Connection.DB(), failed); err != nil {
+			if err := g.recordFailure(undo, rank, elapsed); err != nil {
 				return errors.Join(g.migrationError(undo, execErr), err)
 			}
 

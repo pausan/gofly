@@ -74,7 +74,67 @@ type Config struct {
 	// output
 	Quiet   bool
 	Verbose bool
+
+	// Warnings collects the deprecation notices raised while reading the
+	// configuration, for the caller to print
+	Warnings []string
+
+	// namespaceOrigin remembers where the first flyway.* and the first gofly.*
+	// property came from, so that mixing them can be reported precisely
+	namespaceOrigin map[string]namespaceUse
+
+	// warnedOrigins keeps the deprecation warning down to one per source
+	warnedOrigins map[string]bool
 }
+
+// Origin says where a setting came from. Source identifies the file or channel
+// as a whole, so a deprecation warns once for a config file rather than once per
+// line, while Location pins down the exact spot for the error messages.
+type Origin struct {
+	Source   string
+	Location string
+}
+
+// -----------------------------------------------------------------------------
+// FileOrigin
+// -----------------------------------------------------------------------------
+func FileOrigin(path string, line int) Origin {
+	return Origin{Source: path, Location: fmt.Sprintf("%s:%d", path, line)}
+}
+
+// -----------------------------------------------------------------------------
+// EnvironmentOrigin
+// -----------------------------------------------------------------------------
+func EnvironmentOrigin(name string) Origin {
+	return Origin{Source: "the environment", Location: "the environment variable " + name}
+}
+
+// -----------------------------------------------------------------------------
+// CommandLineOrigin
+// -----------------------------------------------------------------------------
+func CommandLineOrigin() Origin {
+	return Origin{Source: "the command line", Location: "the command line"}
+}
+
+// namespaceUse records the first property seen in a namespace and where it came
+// from, which is all the mixing error needs to be actionable
+type namespaceUse struct {
+	property string
+	location string
+}
+
+// Property namespaces a setting may be written in
+const (
+	// NamespaceFlyway is the deprecated flyway.* / FLYWAY_* namespace
+	NamespaceFlyway = "flyway"
+
+	// NamespaceGofly is the gofly.* / GOFLY_* namespace
+	NamespaceGofly = "gofly"
+
+	// namespaceNone is a bare property name, which belongs to neither and is
+	// what the command line uses
+	namespaceNone = ""
+)
 
 // -----------------------------------------------------------------------------
 // NewConfig
@@ -100,23 +160,44 @@ func NewConfig() *Config {
 		Placeholders:           map[string]string{},
 		PlaceholderPrefix:      "${",
 		PlaceholderSuffix:      "}",
+		namespaceOrigin:        map[string]namespaceUse{},
+		warnedOrigins:          map[string]bool{},
 	}
 }
 
 // -----------------------------------------------------------------------------
 // Set
 //
-// Applies a single `key=value` setting. Keys may be given bare (url), with the
-// flyway prefix (flyway.url) or with the gofly one (gofly.url), so existing
-// Flyway config files keep working untouched.
+// Applies a single `key=value` setting coming from the command line, where
+// property names are always bare.
 // -----------------------------------------------------------------------------
 func (c *Config) Set(key string, value string) error {
-	key = strings.TrimSpace(key)
-	key = strings.TrimPrefix(key, "flyway.")
-	key = strings.TrimPrefix(key, "gofly.")
+	return c.SetFrom(key, value, CommandLineOrigin())
+}
 
-	if rest, found := strings.CutPrefix(key, "placeholders."); found {
-		c.Placeholders[rest] = value
+// -----------------------------------------------------------------------------
+// SetFrom
+//
+// Applies a single `key=value` setting, remembering where it came from so that
+// deprecations and namespace clashes can be reported usefully.
+//
+// A property may be written bare (url), in the gofly namespace (gofly.url) or
+// in the deprecated flyway one (flyway.url). The flyway namespace still works,
+// so an existing flyway.conf needs no editing, but it warns, and the two
+// namespaces cannot be mixed: a configuration half migrated is a configuration
+// nobody can reason about.
+// -----------------------------------------------------------------------------
+func (c *Config) SetFrom(key string, value string, origin Origin) error {
+	key = strings.TrimSpace(key)
+
+	namespace, key := splitNamespace(key)
+	if err := c.recordNamespace(namespace, key, origin); err != nil {
+		return err
+	}
+
+	// placeholder names keep their case, only the prefix is matched loosely
+	if len(key) > len("placeholders.") && strings.EqualFold(key[:len("placeholders.")], "placeholders.") {
+		c.Placeholders[key[len("placeholders."):]] = value
 		return nil
 	}
 
@@ -189,7 +270,7 @@ func (c *Config) Set(key string, value string) error {
 		c.PlaceholderSuffix = value
 
 	// accepted and ignored, they only make sense for the Java edition
-	case "driver", "jarDirs", "resolvers", "callbacks", "skipdefaultresolvers",
+	case "driver", "jardirs", "resolvers", "callbacks", "skipdefaultresolvers",
 		"skipdefaultcallbacks", "cleanonvalidationerror", "configfiles", "errorhandlers",
 		"dryrunoutput":
 		return nil
@@ -202,10 +283,74 @@ func (c *Config) Set(key string, value string) error {
 }
 
 // -----------------------------------------------------------------------------
+// splitNamespace
+//
+// Separates an optional flyway/gofly namespace from the property name. Both the
+// dot and the underscore are accepted as the separator, since config files in
+// the wild use either.
+// -----------------------------------------------------------------------------
+func splitNamespace(key string) (string, string) {
+	for _, namespace := range []string{NamespaceFlyway, NamespaceGofly} {
+		for _, separator := range []string{".", "_"} {
+			prefix := namespace + separator
+			if len(key) > len(prefix) && strings.EqualFold(key[:len(prefix)], prefix) {
+				return namespace, key[len(prefix):]
+			}
+		}
+	}
+
+	return namespaceNone, key
+}
+
+// -----------------------------------------------------------------------------
+// recordNamespace
+//
+// Notes which namespace a property was written in, warns the first time the
+// deprecated one shows up, and refuses to carry on once both have been used.
+// -----------------------------------------------------------------------------
+func (c *Config) recordNamespace(namespace string, key string, origin Origin) error {
+	if namespace == namespaceNone {
+		return nil
+	}
+
+	other := NamespaceGofly
+	if namespace == NamespaceGofly {
+		other = NamespaceFlyway
+	}
+
+	if clash, mixed := c.namespaceOrigin[other]; mixed {
+		return fmt.Errorf(
+			"cannot mix the %s.* and %s.* property namespaces: %s.%s comes from %s, "+
+				"while %s was already set from %s. Pick one namespace and use it throughout, "+
+				"%s.* is the one to move to",
+			other, namespace, namespace, key, origin.Location, clash.property, clash.location, NamespaceGofly)
+	}
+
+	if _, seen := c.namespaceOrigin[namespace]; !seen {
+		c.namespaceOrigin[namespace] = namespaceUse{
+			property: namespace + "." + key,
+			location: origin.Location,
+		}
+	}
+
+	if namespace == NamespaceFlyway && !c.warnedOrigins[origin.Source] {
+		c.warnedOrigins[origin.Source] = true
+		c.Warnings = append(c.Warnings, fmt.Sprintf(
+			"%s still uses the deprecated %s.* namespace; rename those properties to %s.* "+
+				"(%s.url becomes %s.url, and so on). They keep working for now, but the two "+
+				"namespaces cannot be mixed",
+			origin.Source, NamespaceFlyway, NamespaceGofly, NamespaceFlyway, NamespaceGofly))
+	}
+
+	return nil
+}
+
+// -----------------------------------------------------------------------------
 // LoadConfigFile
 //
-// Reads a Flyway style properties file. Blank lines and lines starting with #
-// are skipped.
+// Reads a properties file in the Flyway syntax. Blank lines and lines starting
+// with # or ! are skipped. Properties may use the gofly.* namespace, the
+// deprecated flyway.* one or no namespace at all, but not a mixture.
 // -----------------------------------------------------------------------------
 func (c *Config) LoadConfigFile(path string) error {
 	file, err := os.Open(path)
@@ -231,8 +376,9 @@ func (c *Config) LoadConfigFile(path string) error {
 			return fmt.Errorf("%s:%d: expected key=value, got %q", path, lineNumber, line)
 		}
 
-		if err := c.Set(strings.TrimSpace(key), strings.TrimSpace(value)); err != nil {
-			return fmt.Errorf("%s:%d: %w", path, lineNumber, err)
+		origin := FileOrigin(path, lineNumber)
+		if err := c.SetFrom(strings.TrimSpace(key), strings.TrimSpace(value), origin); err != nil {
+			return fmt.Errorf("%s: %w", origin.Location, err)
 		}
 	}
 
@@ -253,12 +399,12 @@ func (c *Config) LoadEnvironment(environment []string) error {
 			continue
 		}
 
-		var suffix string
+		var namespace, suffix string
 		switch {
 		case strings.HasPrefix(name, "FLYWAY_"):
-			suffix = strings.TrimPrefix(name, "FLYWAY_")
+			namespace, suffix = NamespaceFlyway, strings.TrimPrefix(name, "FLYWAY_")
 		case strings.HasPrefix(name, "GOFLY_"):
-			suffix = strings.TrimPrefix(name, "GOFLY_")
+			namespace, suffix = NamespaceGofly, strings.TrimPrefix(name, "GOFLY_")
 		default:
 			continue
 		}
@@ -268,7 +414,9 @@ func (c *Config) LoadEnvironment(environment []string) error {
 			continue
 		}
 
-		if err := c.Set(key, value); err != nil {
+		// the environment carries the namespace in the variable name itself, so
+		// FLYWAY_URL counts as flyway.url for the deprecation and mixing rules
+		if err := c.SetFrom(namespace+"."+key, value, EnvironmentOrigin(name)); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
@@ -318,18 +466,36 @@ func environmentKeyToProperty(suffix string) (string, bool) {
 // Missing files are simply not returned.
 // -----------------------------------------------------------------------------
 func DefaultConfigFiles() []string {
-	candidates := []string{}
+	goflyCandidates := []string{}
+	flywayCandidates := []string{}
 
 	if executable, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(executable), "conf", "gofly.conf"))
+		directory := filepath.Dir(executable)
+		goflyCandidates = append(goflyCandidates, filepath.Join(directory, "conf", "gofly.conf"))
+		flywayCandidates = append(flywayCandidates, filepath.Join(directory, "conf", "flyway.conf"))
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, "gofly.conf"))
-		candidates = append(candidates, filepath.Join(home, "flyway.conf"))
+		goflyCandidates = append(goflyCandidates, filepath.Join(home, "gofly.conf"))
+		flywayCandidates = append(flywayCandidates, filepath.Join(home, "flyway.conf"))
 	}
-	candidates = append(candidates, "gofly.conf", "flyway.conf")
+	goflyCandidates = append(goflyCandidates, "gofly.conf")
+	flywayCandidates = append(flywayCandidates, "flyway.conf")
 
+	// a gofly.conf anywhere wins outright: picking up a leftover flyway.conf as
+	// well would mix the two namespaces through no fault of the user
+	if existing := existingFiles(goflyCandidates); len(existing) > 0 {
+		return existing
+	}
+
+	return existingFiles(flywayCandidates)
+}
+
+// -----------------------------------------------------------------------------
+// existingFiles
+// -----------------------------------------------------------------------------
+func existingFiles(candidates []string) []string {
 	existing := []string{}
+
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			existing = append(existing, candidate)

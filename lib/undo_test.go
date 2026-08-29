@@ -310,10 +310,14 @@ func TestBaselineOnMigrate(t *testing.T) {
 func TestRepairRemovesFailedMigrations(t *testing.T) {
 	setup := newTestSetup(t)
 	setup.write("V1__a.sql", "CREATE TABLE a (id INT);\n")
-	setup.write("V2__b.sql", "THIS IS NOT SQL;\n")
+	setup.mustMigrate()
+
+	// a failure left behind by an engine that cannot roll DDL back
+	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
+	setup.insertFailedRow("2", "b", "V2__b.sql")
 
 	if _, err := setup.migrate(); err == nil {
-		t.Fatal("migrate should have failed")
+		t.Fatal("the failed row should have blocked migrate")
 	}
 
 	gofly := setup.open()
@@ -327,8 +331,7 @@ func TestRepairRemovesFailedMigrations(t *testing.T) {
 		t.Errorf("removed %d failed rows, want 1", result.RemovedFailed)
 	}
 
-	// with the failure gone, a fixed V2 goes in cleanly
-	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
+	// with the failure gone, V2 goes in cleanly
 	if _, err := setup.migrate(); err != nil {
 		t.Fatalf("migrate after repair failed: %v", err)
 	}

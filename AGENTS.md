@@ -34,6 +34,8 @@ lib/
   validate.go        the validation rules, with Flyway's error codes
   gofly.go           migrate, undo, baseline, repair
   asciitable.go      the info table
+test/e2e/            the Flyway compatibility harness
+docs/                cli, configuration, migrations, compatibility
 ```
 
 ## The rules that matter
@@ -83,18 +85,63 @@ skips the history schema, and `NewWithConnection` pins the session to the
 resolved schema before anything runs. There is a regression test for this in
 `lib/integration_test.go`; it cannot be reproduced on SQLite.
 
-### 5. Version equality is not string equality
+### 5. Failures are only recorded where the DDL could not be rolled back
+
+`recordFailure` writes a failed row only when `SupportsDDLTransactions()` is
+false. This is Flyway's behaviour (`DbMigrate`, the `else` branch of
+`supportsDdlTransactions()`), and the reasoning holds: if everything rolled
+back, there is nothing to repair, and a leftover failed row would block the next
+run over changes that no longer exist.
+
+Recording the failure unconditionally seems more helpful and is wrong. The
+compatibility harness catches it.
+
+### 6. The history stores the normalized version
+
+`V1_2__x.sql` is recorded as `1.2`, because Flyway stores
+`MigrationVersion.toString()`, which is the text with underscores already turned
+into dots. `Version.RawVersion()` keeps the original spelling and must not be
+used for the `version` column.
+
+### 7. Version equality is not string equality
 
 `1`, `1.0`, `1.0.0` and `1_0` are all the same version to Flyway, because
 trailing zero parts are trimmed. Use `Version.CanonicalKey()` for map keys and
 duplicate detection, never `Version.String()`, which keeps the text as written.
 
+### 8. flyway.* is deprecated, and the namespaces never mix
+
+Config properties and environment variables come in three forms: bare (`url`),
+`gofly.*` (preferred) and `flyway.*` (deprecated, warns once per source). Once
+one namespace has been used, the other is an error. Bare names belong to
+neither, which is why the command line never trips the rule.
+
+`Config.SetFrom` takes an `Origin`, whose `Source` deduplicates the warning per
+file and whose `Location` pins the exact line for the error. Anything new that
+reads configuration must go through `SetFrom` with a real origin.
+
 ## Testing
 
 ```sh
 make test              # unit tests plus real migrations against sqlite
+make test-e2e          # the compatibility harness, all four databases
 make test-integration  # postgres, mysql and sql server in docker
 ```
+
+### The compatibility harness is the important one
+
+`test/e2e/` runs every scenario twice against the same engine, once with real
+Flyway in a container and once with gofly, then compares the resulting schema
+history tables. It has already caught three real incompatibilities that the unit
+tests happily agreed with, because the unit tests only ever asserted what I
+believed Flyway did.
+
+**Run it before claiming anything about compatibility.** If a unit test and the
+harness disagree, the harness is right and the unit test is encoding an
+assumption.
+
+Adding a database, or touching the checksum, the DDL, the version handling or
+the validation rules, means adding to or re-running that suite.
 
 The unit tests run real migrations against real SQLite files rather than mocks,
 so they exercise the actual SQL. Coverage sits around 80%.
@@ -102,10 +149,10 @@ so they exercise the actual SQL. Coverage sits around 80%.
 Integration tests are behind the `integration` build tag and skip themselves
 unless `GOFLY_TEST_PG_URL` and friends are exported.
 
-### Checking against real Flyway
+### Checking against real Flyway by hand
 
-The strongest test is the round trip, and it is worth redoing after any change
-to the checksum, the DDL or the validation:
+`make test-e2e` automates all of this, but the round trip is worth doing by hand
+when debugging a specific disagreement:
 
 ```sh
 docker network create gofly-test-net
@@ -174,9 +221,19 @@ func FunctionName() {
 
 ## Deliberately out of scope
 
-Java and script migrations, callbacks, cherry-pick, dry runs, Flyway's
-`ignoreMigrationPatterns`, and databases beyond the four supported. `clean` is
-not implemented: wiping a schema is not a migration.
+See [docs/compatibility.md](docs/compatibility.md#deliberately-left-out) for the
+full list and the reasoning. In short: Java and script migrations, callbacks,
+cherry-pick, dry runs, `ignoreMigrationPatterns`, locking, `clean`, and every
+database beyond the four supported.
 
 If you add one of these, it should be because someone asked for it, not because
-Flyway has it.
+Flyway has it. And if you do add a database, it goes in the compatibility
+harness in the same change.
+
+## Documentation
+
+`docs/` is written for users, `AGENTS.md` for whoever maintains this. When
+behaviour changes, both need updating: `docs/cli.md` for options and commands,
+`docs/configuration.md` for anything about config sources,
+`docs/migrations.md` for naming, checksums and transactions,
+`docs/compatibility.md` for anything that matches or diverges from Flyway.

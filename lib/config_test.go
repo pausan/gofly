@@ -34,19 +34,105 @@ func TestConfigDefaultsMatchFlyway(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// TestConfigAcceptsFlywayAndGoflyPrefixes
+// TestConfigAcceptsEitherNamespace
 // -----------------------------------------------------------------------------
-func TestConfigAcceptsFlywayAndGoflyPrefixes(t *testing.T) {
-	config := NewConfig()
-
-	for _, key := range []string{"url", "flyway.url", "gofly.url"} {
-		config.URL = ""
+func TestConfigAcceptsEitherNamespace(t *testing.T) {
+	// each namespace works on its own, including the underscore spelling some
+	// config files in the wild use
+	for _, key := range []string{"url", "flyway.url", "gofly.url", "flyway_url", "GOFLY_URL"} {
+		config := NewConfig()
 		if err := config.Set(key, "jdbc:sqlite:x.db"); err != nil {
 			t.Fatalf("%s was rejected: %v", key, err)
 		}
 		if config.URL != "jdbc:sqlite:x.db" {
 			t.Errorf("%s did not set the url", key)
 		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigWarnsAboutTheFlywayNamespace
+// -----------------------------------------------------------------------------
+func TestConfigWarnsAboutTheFlywayNamespace(t *testing.T) {
+	config := NewConfig()
+
+	if err := config.SetFrom("flyway.url", "jdbc:sqlite:x.db", FileOrigin("old.conf", 1)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := config.SetFrom("flyway.user", "root", FileOrigin("old.conf", 2)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(config.Warnings) != 1 {
+		t.Fatalf("got %d warnings, want exactly one per source: %v", len(config.Warnings), config.Warnings)
+	}
+	for _, expected := range []string{"old.conf", "deprecated", "gofly.*"} {
+		if !strings.Contains(config.Warnings[0], expected) {
+			t.Errorf("the warning should mention %q: %s", expected, config.Warnings[0])
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigDoesNotWarnAboutTheGoflyNamespace
+// -----------------------------------------------------------------------------
+func TestConfigDoesNotWarnAboutTheGoflyNamespace(t *testing.T) {
+	config := NewConfig()
+
+	config.SetFrom("gofly.url", "jdbc:sqlite:x.db", FileOrigin("gofly.conf", 1))
+	config.Set("user", "root")
+
+	if len(config.Warnings) != 0 {
+		t.Errorf("no warning was expected: %v", config.Warnings)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigRefusesToMixNamespaces
+// -----------------------------------------------------------------------------
+func TestConfigRefusesToMixNamespaces(t *testing.T) {
+	// flyway first, then gofly
+	config := NewConfig()
+	if err := config.SetFrom("flyway.url", "x", FileOrigin("a.conf", 1)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	err := config.SetFrom("gofly.user", "root", FileOrigin("a.conf", 2))
+	if err == nil {
+		t.Fatal("mixing the namespaces should have been refused")
+	}
+	for _, expected := range []string{"cannot mix", "flyway.url", "a.conf:1", "a.conf:2"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Errorf("the error should mention %q: %v", expected, err)
+		}
+	}
+
+	// and the other way round
+	config = NewConfig()
+	if err := config.SetFrom("gofly.url", "x", FileOrigin("b.conf", 1)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := config.SetFrom("flyway.user", "root", FileOrigin("b.conf", 2)); err == nil {
+		t.Error("mixing the namespaces should have been refused")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigBareNamesMixWithAnything
+//
+// The command line has no namespace, so it must never trip the mixing rule.
+// -----------------------------------------------------------------------------
+func TestConfigBareNamesMixWithAnything(t *testing.T) {
+	config := NewConfig()
+
+	config.SetFrom("flyway.url", "x", FileOrigin("old.conf", 1))
+	if err := config.Set("user", "root"); err != nil {
+		t.Errorf("a bare property should always be accepted: %v", err)
+	}
+
+	config = NewConfig()
+	config.SetFrom("gofly.url", "x", FileOrigin("gofly.conf", 1))
+	if err := config.Set("user", "root"); err != nil {
+		t.Errorf("a bare property should always be accepted: %v", err)
 	}
 }
 
@@ -163,12 +249,12 @@ func TestConfigReadsTheEnvironment(t *testing.T) {
 	config := NewConfig()
 
 	environment := []string{
-		"FLYWAY_URL=jdbc:sqlite:x.db",
-		"FLYWAY_PASSWORD=fromenv",
-		"FLYWAY_SQL_MIGRATION_SEPARATOR=_",
-		"FLYWAY_BASELINE_ON_MIGRATE=true",
+		"GOFLY_URL=jdbc:sqlite:x.db",
+		"GOFLY_PASSWORD=fromenv",
+		"GOFLY_SQL_MIGRATION_SEPARATOR=_",
+		"GOFLY_BASELINE_ON_MIGRATE=true",
 		"GOFLY_TABLE=custom_history",
-		"FLYWAY_PLACEHOLDERS_DBNAME=mydb",
+		"GOFLY_PLACEHOLDERS_DBNAME=mydb",
 		"PATH=/usr/bin",
 		"UNRELATED=1",
 	}
@@ -276,5 +362,116 @@ func TestPlaceholderErrorOnUnset(t *testing.T) {
 	}
 	if _, err := replacer.Replace("${unknown}"); err == nil {
 		t.Error("an unset placeholder should have been reported")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigReadsTheDeprecatedEnvironmentNamespace
+// -----------------------------------------------------------------------------
+func TestConfigReadsTheDeprecatedEnvironmentNamespace(t *testing.T) {
+	config := NewConfig()
+
+	err := config.LoadEnvironment([]string{
+		"FLYWAY_URL=jdbc:sqlite:x.db",
+		"FLYWAY_USER=root",
+	})
+	if err != nil {
+		t.Fatalf("the environment was rejected: %v", err)
+	}
+
+	if config.URL != "jdbc:sqlite:x.db" || config.User != "root" {
+		t.Errorf("FLYWAY_* was not read: %q / %q", config.URL, config.User)
+	}
+	if len(config.Warnings) == 0 {
+		t.Error("FLYWAY_* should have warned")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigRefusesToMixNamespacesInTheEnvironment
+// -----------------------------------------------------------------------------
+func TestConfigRefusesToMixNamespacesInTheEnvironment(t *testing.T) {
+	config := NewConfig()
+
+	err := config.LoadEnvironment([]string{
+		"FLYWAY_URL=jdbc:sqlite:x.db",
+		"GOFLY_USER=root",
+	})
+	if err == nil {
+		t.Fatal("mixing FLYWAY_* and GOFLY_* should have been refused")
+	}
+	if !strings.Contains(err.Error(), "cannot mix") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigFileMixingNamespacesIsReported
+// -----------------------------------------------------------------------------
+func TestConfigFileMixingNamespacesIsReported(t *testing.T) {
+	path := writeTempFile(t, "mixed.conf", "flyway.url=jdbc:sqlite:x.db\ngofly.user=root\n")
+
+	config := NewConfig()
+	err := config.LoadConfigFile(path)
+	if err == nil {
+		t.Fatal("a config file mixing namespaces should have been rejected")
+	}
+	if !strings.Contains(err.Error(), ":2:") || !strings.Contains(err.Error(), "cannot mix") {
+		t.Errorf("the error should point at line 2: %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigFileInTheFlywayNamespaceStillWorks
+// -----------------------------------------------------------------------------
+func TestConfigFileInTheFlywayNamespaceStillWorks(t *testing.T) {
+	path := writeTempFile(t, "flyway.conf", "flyway.url=jdbc:sqlite:x.db\nflyway.user=root\n")
+
+	config := NewConfig()
+	if err := config.LoadConfigFile(path); err != nil {
+		t.Fatalf("an existing flyway.conf must keep working: %v", err)
+	}
+	if config.URL != "jdbc:sqlite:x.db" || config.User != "root" {
+		t.Errorf("the file was not read: %q / %q", config.URL, config.User)
+	}
+	if len(config.Warnings) != 1 {
+		t.Errorf("got %d warnings, want one: %v", len(config.Warnings), config.Warnings)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigAcceptsAndIgnoresJavaOnlyProperties
+//
+// These only ever meant anything to the Java edition, but a long-standing
+// flyway.conf carries them and must keep working. The switch that handles them
+// lowercases the key, so a mixed case entry in that list silently never matches:
+// this test is here to catch exactly that.
+// -----------------------------------------------------------------------------
+func TestConfigAcceptsAndIgnoresJavaOnlyProperties(t *testing.T) {
+	javaOnly := []string{
+		"driver", "jarDirs", "resolvers", "callbacks", "skipDefaultResolvers",
+		"skipDefaultCallbacks", "cleanOnValidationError", "errorHandlers", "dryRunOutput",
+	}
+
+	for _, key := range javaOnly {
+		config := NewConfig()
+		if err := config.Set(key, "anything"); err != nil {
+			t.Errorf("%s should be accepted and ignored: %v", key, err)
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigPropertyNamesAreCaseInsensitive
+// -----------------------------------------------------------------------------
+func TestConfigPropertyNamesAreCaseInsensitive(t *testing.T) {
+	for _, key := range []string{"outOfOrder", "outoforder", "OUTOFORDER", "OutOfOrder"} {
+		config := NewConfig()
+		if err := config.Set(key, "true"); err != nil {
+			t.Fatalf("%s was rejected: %v", key, err)
+		}
+		if !config.OutOfOrder {
+			t.Errorf("%s did not set outOfOrder", key)
+		}
 	}
 }

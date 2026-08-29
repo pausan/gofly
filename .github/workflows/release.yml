@@ -25,19 +25,16 @@ on:
 permissions:
   contents: write
 
-env:
-  GO_VERSION: "1.22"
-
 jobs:
   verify:
     name: Lint and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
 
       - name: Check formatting
@@ -70,11 +67,11 @@ jobs:
       matrix:
         database: [sqlite, postgres, mysql, mssql]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
 
       - name: Pull the Flyway image
@@ -96,11 +93,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: [verify, compatibility]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
 
       - name: Work out the version

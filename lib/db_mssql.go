@@ -177,7 +177,7 @@ func (d *mssqlDialect) SetSessionSchema(db *sql.DB, schema string) error {
 // -----------------------------------------------------------------------------
 func mssqlDSN(rawURL string, user string, password string) (string, error) {
 	trimmed := rawURL
-	for _, prefix := range []string{"jdbc:sqlserver:", "sqlserver:"} {
+	for _, prefix := range []string{"jdbc:sqlserver:", "sqlserver:", "mssql:"} {
 		if strings.HasPrefix(strings.ToLower(trimmed), prefix) {
 			trimmed = trimmed[len(prefix):]
 			break

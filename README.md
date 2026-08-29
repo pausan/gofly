@@ -119,15 +119,22 @@ configuration is one nobody can reason about.
 ### Database urls
 
 gofly speaks JDBC urls, so the connection strings from an existing Flyway setup
-can be copied across verbatim:
+can be copied across verbatim. The `jdbc:` prefix is optional, both columns below
+mean the same thing:
 
-| Database   | URL |
-|------------|-----|
-| PostgreSQL | `jdbc:postgresql://host:5432/database` |
-| MySQL      | `jdbc:mysql://host:3306/database` |
-| MariaDB    | `jdbc:mariadb://host:3306/database` |
-| SQL Server | `jdbc:sqlserver://host:1433;databaseName=database` |
-| SQLite     | `jdbc:sqlite:/path/to/file.db` |
+| Database   | URL | Also accepted |
+|------------|-----|---------------|
+| PostgreSQL | `jdbc:postgresql://host:5432/database` | `postgresql://...`, `postgres://...`, `pg://...` |
+| MySQL      | `jdbc:mysql://host:3306/database` | `mysql://...` |
+| MariaDB    | `jdbc:mariadb://host:3306/database` | `mariadb://...` |
+| SQL Server | `jdbc:sqlserver://host:1433;databaseName=database` | `sqlserver://...` |
+| SQLite     | `jdbc:sqlite:/path/to/file.db` | `sqlite:/path/to/file.db` |
+
+So a full run needs no config file at all:
+
+```bash
+gofly info -url=mysql://localhost:3306/artypistdb -user=myuser -pass=mypass
+```
 
 ## Taking over from Flyway
 

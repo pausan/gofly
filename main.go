@@ -14,7 +14,7 @@ import (
 )
 
 // Version of gofly itself
-const Version = "0.1.0"
+const Version = "0.1.1"
 
 // -----------------------------------------------------------------------------
 // main
@@ -30,6 +30,13 @@ func main() {
 // code. Kept apart from main so that the tests can drive it.
 // -----------------------------------------------------------------------------
 func run(args []string, stdout io.Writer, stderr io.Writer) int {
+	// answered before anything is parsed so that a broken environment or a
+	// broken config file can never get in the way of asking for help
+	if command, ok := standaloneCommand(args); ok {
+		printHelpOrVersion(command, stdout)
+		return 0
+	}
+
 	commands, config, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "ERROR: %s\n", err)
@@ -47,10 +54,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			printUsage(stdout)
 			return 0
 		case "version", "-v", "--version":
-			// the databases are listed because the release also ships single
-			// database builds, which are otherwise hard to tell apart
-			fmt.Fprintf(stdout, "gofly %s\n", Version)
-			fmt.Fprintf(stdout, "databases: %s\n", strings.Join(lib.CompiledInDialects(), ", "))
+			printVersion(stdout)
 			return 0
 		}
 	}
@@ -80,6 +84,58 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+// -----------------------------------------------------------------------------
+// standaloneCommand
+//
+// Returns "help" or "version" when the command line asks for nothing else, an
+// empty command line included. Both answers come from the binary alone, so they
+// are served without reading the environment or the config files.
+// -----------------------------------------------------------------------------
+func standaloneCommand(args []string) (string, bool) {
+	if len(args) == 0 {
+		return "help", true
+	}
+
+	command := ""
+
+	for _, arg := range args {
+		switch strings.ToLower(strings.TrimLeft(arg, "-")) {
+		case "help", "h", "?":
+			command = "help"
+		case "version", "v":
+			if command == "" {
+				command = "version"
+			}
+		default:
+			return "", false
+		}
+	}
+
+	return command, true
+}
+
+// -----------------------------------------------------------------------------
+// printHelpOrVersion
+// -----------------------------------------------------------------------------
+func printHelpOrVersion(command string, stdout io.Writer) {
+	if command == "version" {
+		printVersion(stdout)
+		return
+	}
+
+	printUsage(stdout)
+}
+
+// -----------------------------------------------------------------------------
+// printVersion
+// -----------------------------------------------------------------------------
+func printVersion(out io.Writer) {
+	// the databases are listed because the release also ships single database
+	// builds, which are otherwise hard to tell apart
+	fmt.Fprintf(out, "gofly %s\n", Version)
+	fmt.Fprintf(out, "databases: %s\n", strings.Join(lib.CompiledInDialects(), ", "))
 }
 
 // -----------------------------------------------------------------------------
@@ -235,12 +291,27 @@ Commands
   clean       Not implemented on purpose, see the README
 
 Connection
-  -url=...                 jdbc:postgresql://host:port/db, jdbc:mysql://...,
-                           jdbc:sqlserver://host:port;databaseName=db,
-                           jdbc:sqlite:/path/to.db
+  -url=...                 Database url, see the examples below
   -user=...                Database user
-  -password=...            Database password
+  -password=...            Database password (-pass also works)
   -connectRetries=0        Retries, one second apart, before giving up
+
+Database urls
+  The jdbc: prefix Flyway needs is optional, mysql://... and jdbc:mysql://...
+  are read exactly the same way.
+
+  postgresql://host:5432/mydb              (postgres:// and pg:// too)
+  mysql://host:3306/mydb
+  mariadb://host:3306/mydb
+  sqlserver://host:1433;databaseName=mydb
+  sqlite:/path/to.db                       (file: too)
+
+Examples
+  gofly info -url=mysql://localhost:3306/mydb -user=root -pass=secret
+  gofly migrate -url=postgresql://db:5432/mydb -user=admin -pass=secret \
+        -locations=filesystem:./db/schema
+  gofly migrate -configFiles=flyway.conf
+  gofly validate info -url=sqlite:./local.db
 
 Migrations
   -locations=...           Comma separated filesystem:<dir> locations

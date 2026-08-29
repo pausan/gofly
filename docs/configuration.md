@@ -118,15 +118,16 @@ Variables that match no known property are ignored, so an unrelated
 ## Database urls
 
 gofly speaks JDBC urls, so connection strings copy across from an existing
-Flyway setup unchanged. Native Go DSNs are accepted too.
+Flyway setup unchanged. The `jdbc:` prefix is optional: strip it and the url is
+the native Go DSN, parsed exactly the same way.
 
-| Database | URL |
-|---|---|
-| PostgreSQL | `jdbc:postgresql://host:5432/database`<br>`postgres://user:pass@host:5432/database` |
-| MySQL | `jdbc:mysql://host:3306/database` |
-| MariaDB | `jdbc:mariadb://host:3306/database` |
-| SQL Server | `jdbc:sqlserver://host:1433;databaseName=database` |
-| SQLite | `jdbc:sqlite:/path/to/file.db` |
+| Database | URL | Also accepted |
+|---|---|---|
+| PostgreSQL | `jdbc:postgresql://host:5432/database` | `postgresql://host:5432/database`<br>`postgres://user:pass@host:5432/database`<br>`pg://host:5432/database` |
+| MySQL | `jdbc:mysql://host:3306/database` | `mysql://host:3306/database` |
+| MariaDB | `jdbc:mariadb://host:3306/database` | `mariadb://host:3306/database` |
+| SQL Server | `jdbc:sqlserver://host:1433;databaseName=database` | `sqlserver://host:1433;databaseName=database` |
+| SQLite | `jdbc:sqlite:/path/to/file.db` | `sqlite:/path/to/file.db`, `file:...` |
 
 Query parameters are passed through to the driver, so
 `jdbc:postgresql://host/db?sslmode=require` works. On SQL Server the JDBC
@@ -134,7 +135,12 @@ Query parameters are passed through to the driver, so
 `database`.
 
 The port may be left out and defaults to 5432, 3306 or 1433. Credentials in the
-url are used when `-user` and `-password` are not given.
+url are used when `-user` and `-password` are not given. `-pass` is accepted as a
+shorthand for `-password`, so a run needs no config file at all:
+
+```bash
+gofly info -url=mysql://localhost:3306/artypistdb -user=myuser -pass=mypass
+```
 
 ## Where the schema history lives
 

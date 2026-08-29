@@ -206,7 +206,8 @@ func (c *Config) SetFrom(key string, value string, origin Origin) error {
 		c.URL = value
 	case "user":
 		c.User = value
-	case "password":
+	// -pass is not a Flyway property, it is accepted because everybody types it
+	case "password", "pass":
 		c.Password = value
 	case "connectretries":
 		return setInt(&c.ConnectRetries, key, value)

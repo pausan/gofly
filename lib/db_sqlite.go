@@ -139,7 +139,7 @@ func (d *sqliteDialect) SetSessionSchema(db *sql.DB, schema string) error {
 func sqliteDSN(rawURL string) string {
 	trimmed := rawURL
 
-	for _, prefix := range []string{"jdbc:sqlite:", "sqlite://", "sqlite:"} {
+	for _, prefix := range []string{"jdbc:sqlite:", "sqlite3://", "sqlite3:", "sqlite://", "sqlite:"} {
 		if strings.HasPrefix(strings.ToLower(trimmed), prefix) {
 			return trimmed[len(prefix):]
 		}

@@ -134,9 +134,9 @@ environment; see [configuration.md](configuration.md).
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-url` | — | JDBC url, required |
+| `-url` | — | Database url, required; the `jdbc:` prefix is optional |
 | `-user` | — | Database user |
-| `-password` | — | Database password |
+| `-password` | — | Database password (`-pass` is accepted too) |
 | `-connectRetries` | `0` | Retries, one second apart, before giving up |
 
 Url formats are listed in [configuration.md](configuration.md#database-urls).

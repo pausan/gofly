@@ -160,38 +160,53 @@ func (c *Connection) Close() error {
 // -----------------------------------------------------------------------------
 // ParseURL
 //
-// Turns a Flyway JDBC url into the driver name and DSN the matching Go driver
-// expects. Native Go DSNs (postgres://, mysql://, ...) are accepted too, so the
-// tool is usable without dragging JDBC syntax around.
+// Turns a database url into the driver name and DSN the matching Go driver
+// expects. The jdbc: prefix Flyway insists on is optional, so postgresql://...
+// and jdbc:postgresql://... are read exactly the same way and the tool is
+// usable without dragging JDBC syntax around.
 // -----------------------------------------------------------------------------
 func ParseURL(url string, user string, password string) (string, string, Dialect, error) {
 	if url == "" {
-		return "", "", nil, errors.New("no database url provided, use -url=jdbc:postgresql://host:port/database")
+		return "", "", nil, errors.New("no database url provided, use -url=postgresql://host:port/database")
 	}
 
-	lower := strings.ToLower(url)
+	trimmed := StripJDBCPrefix(strings.TrimSpace(url))
+	scheme, _, _ := strings.Cut(strings.ToLower(trimmed), ":")
 
-	switch {
-	case strings.HasPrefix(lower, "jdbc:postgresql:"), strings.HasPrefix(lower, "postgres://"),
-		strings.HasPrefix(lower, "postgresql://"):
-		dsn, err := postgresDSN(url, user, password)
+	switch scheme {
+	case "postgresql", "postgres", "pg":
+		dsn, err := postgresDSN(trimmed, user, password)
 		return "pgx", dsn, &postgresDialect{}, err
 
-	case strings.HasPrefix(lower, "jdbc:mysql:"), strings.HasPrefix(lower, "jdbc:mariadb:"),
-		strings.HasPrefix(lower, "mysql://"):
-		dsn, err := mysqlDSN(url, user, password)
+	case "mysql", "mariadb":
+		dsn, err := mysqlDSN(trimmed, user, password)
 		return "mysql", dsn, &mysqlDialect{}, err
 
-	case strings.HasPrefix(lower, "jdbc:sqlserver:"), strings.HasPrefix(lower, "sqlserver://"):
-		dsn, err := mssqlDSN(url, user, password)
+	case "sqlserver", "mssql":
+		dsn, err := mssqlDSN(trimmed, user, password)
 		return "sqlserver", dsn, &mssqlDialect{}, err
 
-	case strings.HasPrefix(lower, "jdbc:sqlite:"), strings.HasPrefix(lower, "sqlite://"),
-		strings.HasPrefix(lower, "file:"):
-		return "sqlite", sqliteDSN(url), &sqliteDialect{}, nil
+	case "sqlite", "sqlite3", "file":
+		return "sqlite", sqliteDSN(trimmed), &sqliteDialect{}, nil
 	}
 
-	return "", "", nil, fmt.Errorf("unsupported database url: %s (expected jdbc:postgresql:, jdbc:mysql:, jdbc:sqlserver: or jdbc:sqlite:)", url)
+	return "", "", nil, fmt.Errorf("unsupported database url: %s (expected postgresql://, mysql://, sqlserver:// or sqlite:, with or without the jdbc: prefix)", url)
+}
+
+// -----------------------------------------------------------------------------
+// StripJDBCPrefix
+//
+// Removes a leading jdbc: so that the rest of the parsing only ever deals with
+// the native scheme. A url that does not carry it is returned untouched.
+// -----------------------------------------------------------------------------
+func StripJDBCPrefix(url string) string {
+	const prefix = "jdbc:"
+
+	if len(url) > len(prefix) && strings.EqualFold(url[:len(prefix)], prefix) {
+		return url[len(prefix):]
+	}
+
+	return url
 }
 
 // -----------------------------------------------------------------------------

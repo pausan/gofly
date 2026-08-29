@@ -210,6 +210,45 @@ func TestRunPrintsUsage(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// TestRunAnswersHelpAndVersionWhateverTheEnvironmentSays
+//
+// FLYWAY_DIR is a real Flyway property that gofly does not implement, so it is
+// enough to make any other command fail. Asking for help has to work anyway.
+// -----------------------------------------------------------------------------
+func TestRunAnswersHelpAndVersionWhateverTheEnvironmentSays(t *testing.T) {
+	withoutDefaultConfigFiles(t)
+	t.Setenv("FLYWAY_DIR", "/some/place")
+
+	if code := run([]string{"info"}, &bytes.Buffer{}, &bytes.Buffer{}); code == 0 {
+		t.Error("an unknown environment property should still fail a real command")
+	}
+
+	for _, args := range [][]string{{}, {"help"}, {"--help"}, {"-h"}, {"-?"}} {
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+
+		if code := run(args, stdout, stderr); code != 0 {
+			t.Errorf("gofly %v exited with %d: %s", args, code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "Usage") {
+			t.Errorf("gofly %v did not print the usage: %q", args, stdout.String())
+		}
+	}
+
+	for _, args := range [][]string{{"version"}, {"--version"}, {"-v"}} {
+		stdout := &bytes.Buffer{}
+		stderr := &bytes.Buffer{}
+
+		if code := run(args, stdout, stderr); code != 0 {
+			t.Errorf("gofly %v exited with %d: %s", args, code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "gofly "+Version) {
+			t.Errorf("gofly %v did not print the version: %q", args, stdout.String())
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
 // withoutDefaultConfigFiles
 //
 // Runs the test from an empty directory and an empty home, so that a gofly.conf

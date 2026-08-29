@@ -122,6 +122,43 @@ func TestParseSqliteURL(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// TestParseURLMakesTheJDBCPrefixOptional
+//
+// Nobody types jdbc: outside of Java, so every url has to parse identically
+// with and without it.
+// -----------------------------------------------------------------------------
+func TestParseURLMakesTheJDBCPrefixOptional(t *testing.T) {
+	cases := map[string]string{
+		"postgresql://db:5432/mydb":               "jdbc:postgresql://db:5432/mydb",
+		"pg://db:5432/mydb":                       "jdbc:postgresql://db:5432/mydb",
+		"mysql://mysql:3306/artypistdb":           "jdbc:mysql://mysql:3306/artypistdb",
+		"mariadb://mariadb:3306/mydb":             "jdbc:mariadb://mariadb:3306/mydb",
+		"sqlserver://host:1433;databaseName=mydb": "jdbc:sqlserver://host:1433;databaseName=mydb",
+		"sqlite:/tmp/test.db":                     "jdbc:sqlite:/tmp/test.db",
+		"MySQL://mysql:3306/mydb":                 "JDBC:MySQL://mysql:3306/mydb",
+	}
+
+	for bare, jdbc := range cases {
+		bareDriver, bareDSN, bareDialect, err := ParseURL(bare, "myuser", "mypass")
+		if err != nil {
+			t.Errorf("%s: %v", bare, err)
+			continue
+		}
+
+		jdbcDriver, jdbcDSN, jdbcDialect, err := ParseURL(jdbc, "myuser", "mypass")
+		if err != nil {
+			t.Errorf("%s: %v", jdbc, err)
+			continue
+		}
+
+		if bareDriver != jdbcDriver || bareDSN != jdbcDSN || bareDialect.Name() != jdbcDialect.Name() {
+			t.Errorf("%s parsed as %s/%s, %s parsed as %s/%s",
+				bare, bareDriver, bareDSN, jdbc, jdbcDriver, jdbcDSN)
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
 // TestParseURLRejectsWhatItCannotHandle
 // -----------------------------------------------------------------------------
 func TestParseURLRejectsWhatItCannotHandle(t *testing.T) {

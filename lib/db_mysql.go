@@ -176,7 +176,7 @@ func (d *mysqlDialect) SetSessionSchema(db *sql.DB, schema string) error {
 // -----------------------------------------------------------------------------
 func mysqlDSN(rawURL string, user string, password string) (string, error) {
 	trimmed := rawURL
-	for _, prefix := range []string{"jdbc:mysql:", "jdbc:mariadb:", "mysql:"} {
+	for _, prefix := range []string{"jdbc:mysql:", "jdbc:mariadb:", "mysql:", "mariadb:"} {
 		if strings.HasPrefix(strings.ToLower(trimmed), prefix) {
 			trimmed = trimmed[len(prefix):]
 			break

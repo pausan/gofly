@@ -5,7 +5,25 @@ BINARY      ?= gofly
 BUILD_DIR   ?= build
 VERSION_IN_SOURCE ?= $(shell grep -oP 'const Version = "\K[^"]+' main.go)
 VERSION           ?=
-LDFLAGS     ?= -s -w
+
+# -s -w drop the symbol table and DWARF, which is the go equivalent of strip.
+# -trimpath keeps build machine paths out of the binary and makes the output
+# reproducible.
+LDFLAGS      ?= -s -w
+GOBUILD_FLAGS ?= -trimpath
+
+# upx packs the release binaries. It cannot pack every target: macOS is refused
+# outright by upx 4 (--force-macos exists but breaks codesigning and Gatekeeper)
+# and win64/arm64 is not implemented, so those three ship stripped but
+# uncompressed.
+#
+# --best --lzma is the smallest but costs about 245ms of decompression on every
+# run (measured on linux/amd64). Plain -9 (UCL) lands at ~5.5M instead of ~4.2M
+# but only costs ~70ms, so switch with UPX_FLAGS=-9 if startup latency matters
+# more than download size.
+UPX        ?= upx
+UPX_FLAGS  ?= --best --lzma
+UPX_TARGETS ?= $(BINARY)-linux-amd64 $(BINARY)-linux-arm64 $(BINARY)-windows-amd64.exe
 
 # CGO stays off so the binary is fully static and cross compiles anywhere
 export CGO_ENABLED = 0
@@ -50,7 +68,7 @@ E2E_MSSQL = GOFLY_E2E_MSSQL_URL="jdbc:sqlserver://127.0.0.1:$(MSSQL_PORT);databa
             GOFLY_E2E_MSSQL_USER="sa" \
             GOFLY_E2E_MSSQL_PASSWORD="$(SA_PASS)"
 
-.PHONY: all build build-all release test test-coverage test-integration \
+.PHONY: all build build-all compress release-all release test test-coverage test-integration \
         test-e2e test-e2e-sqlite test-e2e-postgres test-e2e-mysql test-e2e-mssql \
         lint fmt clean db-up db-up-postgres db-up-mysql db-up-mssql db-down help
 
@@ -59,19 +77,41 @@ all: lint test build
 ## build: compile for the host platform
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) .
+	go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) .
 	@echo "built $(BUILD_DIR)/$(BINARY) $(VERSION_IN_SOURCE)"
 
 ## build-all: cross compile for linux, macos and windows
 build-all:
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux   GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-amd64 .
-	GOOS=linux   GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-arm64 .
-	GOOS=darwin  GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 .
-	GOOS=darwin  GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 .
-	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe .
-	GOOS=windows GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe .
+	GOOS=linux   GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-amd64 .
+	GOOS=linux   GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-arm64 .
+	GOOS=darwin  GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 .
+	GOOS=darwin  GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 .
+	GOOS=windows GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe .
+	GOOS=windows GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe .
 	@ls -lh $(BUILD_DIR)/
+
+## compress: pack the cross compiled binaries with upx, in place. macOS and
+##           windows/arm64 are left as they are, upx cannot handle them.
+compress:
+	@command -v $(UPX) >/dev/null 2>&1 || { \
+	  echo "upx not found. install it with 'apt-get install upx-ucl' or 'brew install upx'"; \
+	  exit 1; \
+	}
+	@for name in $(UPX_TARGETS); do \
+	  path="$(BUILD_DIR)/$$name"; \
+	  if [ ! -f "$$path" ]; then echo "$$name: not built, skipping"; continue; fi; \
+	  if $(UPX) -t "$$path" >/dev/null 2>&1; then echo "$$name: already packed"; continue; fi; \
+	  before=$$(wc -c < "$$path"); \
+	  $(UPX) $(UPX_FLAGS) -q "$$path" >/dev/null || { echo "upx failed on $$name"; exit 1; }; \
+	  $(UPX) -t "$$path" >/dev/null || { echo "packed $$name does not verify"; exit 1; }; \
+	  after=$$(wc -c < "$$path"); \
+	  echo "$$name: $$before -> $$after bytes"; \
+	done
+	@ls -lh $(BUILD_DIR)/
+
+## release-all: what the release workflow ships, cross compiled and packed
+release-all: build-all compress
 
 ## release: publish a github release from this commit (needs the gh cli)
 ##          usage: make release VERSION=v0.2.0

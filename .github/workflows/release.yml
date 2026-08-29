@@ -121,8 +121,14 @@ jobs:
             exit 1
           fi
 
-      - name: Cross compile
-        run: make build-all
+      - name: Install upx
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx-ucl
+          upx --version | head -1
+
+      - name: Cross compile and pack
+        run: make release-all
 
       - name: Checksums
         run: |
@@ -154,6 +160,12 @@ jobs:
             | Windows ARM64 | `gofly-windows-arm64.exe` |
 
             Verify a download with `sha256sum -c SHA256SUMS`.
+
+            Every binary is built without debug symbols. The Linux builds and
+            the Windows x86-64 one are additionally packed with UPX, which is
+            why they are roughly a third of the size. macOS and Windows ARM64
+            are stripped but not packed: UPX cannot pack them, and on macOS
+            packing would break codesigning and Gatekeeper.
 
             Built and released only after the Flyway compatibility suite passed
             against PostgreSQL, MySQL, SQL Server and SQLite.

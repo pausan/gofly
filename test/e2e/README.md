@@ -32,8 +32,11 @@ database through a published port, while Flyway runs inside a container and
 reaches it by name on the docker network:
 
 ```sh
-export GOFLY_E2E_DOCKER_NETWORK=gofly-test-net
 export GOFLY_E2E_FLYWAY_IMAGE=flyway/flyway:10
+
+# only needed for the server targets, and only valid while `make db-up` keeps
+# the network alive. A SQLite only run ignores it
+export GOFLY_E2E_DOCKER_NETWORK=gofly-test-net
 
 export GOFLY_E2E_PG_URL="jdbc:postgresql://127.0.0.1:55433/goflytest"
 export GOFLY_E2E_PG_FLYWAY_URL="jdbc:postgresql://gofly-test-pg:5432/goflytest"

@@ -60,8 +60,11 @@ FLYWAY_IMAGE ?= flyway/flyway:10
 # container and reaches it by name on the docker network.
 E2E_RUN = go test -tags e2e ./test/e2e/ -count=1 -v -timeout 30m
 
-E2E_ENV = GOFLY_E2E_FLYWAY_IMAGE="$(FLYWAY_IMAGE)" \
-          GOFLY_E2E_DOCKER_NETWORK="$(NETWORK)"
+E2E_ENV = GOFLY_E2E_FLYWAY_IMAGE="$(FLYWAY_IMAGE)"
+
+# only the server targets need the network, and it only exists while a database
+# container is up. SQLite talks to a file in the mounted workspace instead.
+E2E_NET = GOFLY_E2E_DOCKER_NETWORK="$(NETWORK)"
 
 E2E_PG = GOFLY_E2E_PG_URL="jdbc:postgresql://127.0.0.1:$(PG_PORT)/$(DB_NAME)" \
          GOFLY_E2E_PG_FLYWAY_URL="jdbc:postgresql://$(PG_CONTAINER):5432/$(DB_NAME)" \
@@ -174,7 +177,7 @@ test-integration: db-up
 
 ## test-e2e: compare gofly against real flyway on every supported database
 test-e2e: db-up flyway-image
-	$(E2E_ENV) $(E2E_PG) $(E2E_MYSQL) $(E2E_MSSQL) $(E2E_RUN)
+	$(E2E_ENV) $(E2E_NET) $(E2E_PG) $(E2E_MYSQL) $(E2E_MSSQL) $(E2E_RUN)
 
 ## test-e2e-sqlite: the same comparison against sqlite only, no servers needed
 test-e2e-sqlite: flyway-image
@@ -182,15 +185,15 @@ test-e2e-sqlite: flyway-image
 
 ## test-e2e-postgres: the comparison against postgres only
 test-e2e-postgres: flyway-image
-	$(E2E_ENV) GOFLY_E2E_SKIP_SQLITE=1 $(E2E_PG) $(E2E_RUN)
+	$(E2E_ENV) $(E2E_NET) GOFLY_E2E_SKIP_SQLITE=1 $(E2E_PG) $(E2E_RUN)
 
 ## test-e2e-mysql: the comparison against mysql only
 test-e2e-mysql: flyway-image
-	$(E2E_ENV) GOFLY_E2E_SKIP_SQLITE=1 $(E2E_MYSQL) $(E2E_RUN)
+	$(E2E_ENV) $(E2E_NET) GOFLY_E2E_SKIP_SQLITE=1 $(E2E_MYSQL) $(E2E_RUN)
 
 ## test-e2e-mssql: the comparison against sql server only
 test-e2e-mssql: flyway-image
-	$(E2E_ENV) GOFLY_E2E_SKIP_SQLITE=1 $(E2E_MSSQL) $(E2E_RUN)
+	$(E2E_ENV) $(E2E_NET) GOFLY_E2E_SKIP_SQLITE=1 $(E2E_MSSQL) $(E2E_RUN)
 
 flyway-image:
 	@docker image inspect $(FLYWAY_IMAGE) >/dev/null 2>&1 || docker pull $(FLYWAY_IMAGE)

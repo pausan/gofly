@@ -317,7 +317,10 @@ func (w *Workspace) RunFlyway(args ...string) (string, bool) {
 		command = append(command, "--user", fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()))
 	}
 
-	if network := os.Getenv("GOFLY_E2E_DOCKER_NETWORK"); network != "" {
+	// only the server targets are reached by container name, so only they need
+	// the network. Asking for it on a SQLite only run fails, because the network
+	// is created together with the database containers
+	if network := os.Getenv("GOFLY_E2E_DOCKER_NETWORK"); network != "" && !w.target.IsSQLite() {
 		command = append(command, "--network", network)
 	}
 

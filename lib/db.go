@@ -10,14 +10,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
-
-	// SQL drivers
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/microsoft/go-mssqldb"
-	_ "modernc.org/sqlite"
 )
 
 // Supported dialects
@@ -91,6 +86,10 @@ type Connection struct {
 func Connect(url string, user string, password string, connectRetries int) (*Connection, error) {
 	driver, dsn, dialect, err := ParseURL(url, user, password)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := checkDriverCompiledIn(driver, dialect.Name()); err != nil {
 		return nil, err
 	}
 
@@ -193,6 +192,51 @@ func ParseURL(url string, user string, password string) (string, string, Dialect
 	}
 
 	return "", "", nil, fmt.Errorf("unsupported database url: %s (expected jdbc:postgresql:, jdbc:mysql:, jdbc:sqlserver: or jdbc:sqlite:)", url)
+}
+
+// -----------------------------------------------------------------------------
+// CompiledInDialects
+//
+// Names the dialects this binary can actually talk to, which is everything for
+// a normal build and a subset for the single database ones. Derived from the
+// drivers that registered themselves, so it cannot drift from reality.
+// -----------------------------------------------------------------------------
+func CompiledInDialects() []string {
+	byDriver := map[string]string{
+		"pgx":       DialectPostgres,
+		"mysql":     DialectMysql,
+		"sqlserver": DialectMssql,
+		"sqlite":    DialectSqlite,
+	}
+
+	var names []string
+	for _, driver := range sql.Drivers() {
+		if dialect, ok := byDriver[driver]; ok {
+			names = append(names, dialect)
+		}
+	}
+	sort.Strings(names)
+
+	return names
+}
+
+// -----------------------------------------------------------------------------
+// checkDriverCompiledIn
+//
+// Turns "sql: unknown driver" into something that explains what happened: this
+// is a single database build and the url asks for a different one.
+// -----------------------------------------------------------------------------
+func checkDriverCompiledIn(driver string, dialect string) error {
+	for _, registered := range sql.Drivers() {
+		if registered == driver {
+			return nil
+		}
+	}
+
+	return fmt.Errorf(
+		"this build of gofly has no %s support, it was built for %s only; use the full gofly binary instead",
+		dialect, strings.Join(CompiledInDialects(), ", "),
+	)
 }
 
 // -----------------------------------------------------------------------------

@@ -40,10 +40,34 @@ or build it yourself:
 ```sh
 make build          # ./build/gofly
 make build-all      # linux, macos and windows, amd64 and arm64
+make release-all    # the same, stripped and packed with upx
 ```
 
 The binary is built with `CGO_ENABLED=0`, so it is fully static and the SQLite
 support needs no system library.
+
+### Single database builds
+
+The full binary talks to all four databases and is around 4 MB packed. If you
+only ever migrate one of them, the releases also carry Linux builds that leave
+the other three drivers out, at roughly half the size:
+
+| Build | Databases | Packed size (amd64) |
+|---|---|---|
+| `gofly` | all four | 4.0 MB |
+| `gofly.pg` | PostgreSQL | 2.4 MB |
+| `gofly.sqlite` | SQLite | 2.2 MB |
+| `gofly.mssql` | SQL Server | 1.9 MB |
+| `gofly.mysql` | MySQL / MariaDB | 1.7 MB |
+
+They are the same tool with the same flags and behaviour, they simply refuse a
+url for a database they were not built with. `gofly version` prints what a given
+binary supports. Build them yourself with `make build-single`, or directly:
+
+```sh
+go build -tags goflymin,db_pg .            # postgres only
+go build -tags goflymin,db_pg,db_sqlite .  # postgres and sqlite
+```
 
 ## Use
 

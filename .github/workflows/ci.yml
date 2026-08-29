@@ -38,6 +38,9 @@ jobs:
           go vet ./...
           go vet -tags integration ./lib/
           go vet -tags e2e ./test/e2e/
+          for db in sqlite pg mysql mssql; do
+            go vet -tags "goflymin,db_$db" ./...
+          done
 
       - name: Test
         run: go test ./... -count=1 -coverprofile=coverage.out

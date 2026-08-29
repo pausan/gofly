@@ -47,7 +47,10 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			printUsage(stdout)
 			return 0
 		case "version", "-v", "--version":
+			// the databases are listed because the release also ships single
+			// database builds, which are otherwise hard to tell apart
 			fmt.Fprintf(stdout, "gofly %s\n", Version)
+			fmt.Fprintf(stdout, "databases: %s\n", strings.Join(lib.CompiledInDialects(), ", "))
 			return 0
 		}
 	}

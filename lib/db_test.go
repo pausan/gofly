@@ -261,3 +261,35 @@ func TestDefaultHistorySchema(t *testing.T) {
 		t.Error("sqlite has no schemas")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestCompiledInDialects
+//
+// A plain build carries every driver. The single database builds are covered by
+// vetting and building them in CI, they cannot be exercised from here.
+// -----------------------------------------------------------------------------
+func TestCompiledInDialects(t *testing.T) {
+	got := strings.Join(CompiledInDialects(), ",")
+	want := "mysql,postgresql,sqlite,sqlserver"
+
+	if got != want {
+		t.Errorf("compiled in dialects %q, want %q", got, want)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestCheckDriverCompiledIn
+// -----------------------------------------------------------------------------
+func TestCheckDriverCompiledIn(t *testing.T) {
+	if err := checkDriverCompiledIn("pgx", DialectPostgres); err != nil {
+		t.Errorf("pgx should be compiled in: %v", err)
+	}
+
+	err := checkDriverCompiledIn("oracle", "oracle")
+	if err == nil {
+		t.Fatal("a driver that was never registered should be reported")
+	}
+	if !strings.Contains(err.Error(), "no oracle support") {
+		t.Errorf("unhelpful error: %v", err)
+	}
+}

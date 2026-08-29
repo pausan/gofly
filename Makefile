@@ -23,7 +23,17 @@ GOBUILD_FLAGS ?= -trimpath
 # more than download size.
 UPX        ?= upx
 UPX_FLAGS  ?= --best --lzma
-UPX_TARGETS ?= $(BINARY)-linux-amd64 $(BINARY)-linux-arm64 $(BINARY)-windows-amd64.exe
+
+# the single database builds, shipped for linux only. Each drops the three
+# drivers it does not need, which roughly halves the packed binary. See
+# lib/driver_pg.go for the build tags.
+SINGLE_DBS   ?= sqlite pg mysql mssql
+SINGLE_ARCHS ?= amd64 arm64
+
+FULL_TARGETS   = $(BINARY)-linux-amd64 $(BINARY)-linux-arm64 $(BINARY)-windows-amd64.exe
+SINGLE_TARGETS = $(foreach db,$(SINGLE_DBS),$(foreach arch,$(SINGLE_ARCHS),$(BINARY).$(db)-linux-$(arch)))
+
+UPX_TARGETS ?= $(FULL_TARGETS) $(SINGLE_TARGETS)
 
 # CGO stays off so the binary is fully static and cross compiles anywhere
 export CGO_ENABLED = 0
@@ -68,7 +78,7 @@ E2E_MSSQL = GOFLY_E2E_MSSQL_URL="jdbc:sqlserver://127.0.0.1:$(MSSQL_PORT);databa
             GOFLY_E2E_MSSQL_USER="sa" \
             GOFLY_E2E_MSSQL_PASSWORD="$(SA_PASS)"
 
-.PHONY: all build build-all compress release-all release test test-coverage test-integration \
+.PHONY: all build build-all build-single compress release-all release test test-coverage test-integration \
         test-e2e test-e2e-sqlite test-e2e-postgres test-e2e-mysql test-e2e-mssql \
         lint fmt clean db-up db-up-postgres db-up-mysql db-up-mssql db-down help
 
@@ -80,8 +90,9 @@ build:
 	go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) .
 	@echo "built $(BUILD_DIR)/$(BINARY) $(VERSION_IN_SOURCE)"
 
-## build-all: cross compile for linux, macos and windows
-build-all:
+## build-all: cross compile for linux, macos and windows, plus the linux only
+##            single database builds
+build-all: build-single
 	@mkdir -p $(BUILD_DIR)
 	GOOS=linux   GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-amd64 .
 	GOOS=linux   GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-arm64 .
@@ -90,6 +101,18 @@ build-all:
 	GOOS=windows GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe .
 	GOOS=windows GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe .
 	@ls -lh $(BUILD_DIR)/
+
+## build-single: the linux only builds that carry a single database driver
+build-single:
+	@mkdir -p $(BUILD_DIR)
+	@for db in $(SINGLE_DBS); do \
+	  for arch in $(SINGLE_ARCHS); do \
+	    out="$(BUILD_DIR)/$(BINARY).$$db-linux-$$arch"; \
+	    GOOS=linux GOARCH=$$arch go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" \
+	      -tags "goflymin,db_$$db" -o "$$out" . || exit 1; \
+	    echo "built $$out"; \
+	  done; \
+	done
 
 ## compress: pack the cross compiled binaries with upx, in place. macOS and
 ##           windows/arm64 are left as they are, upx cannot handle them.
@@ -179,6 +202,10 @@ lint:
 	go vet ./...
 	go vet -tags integration ./lib/
 	go vet -tags e2e ./test/e2e/
+	@for db in $(SINGLE_DBS); do \
+	  echo "go vet -tags goflymin,db_$$db ./..."; \
+	  go vet -tags "goflymin,db_$$db" ./... || exit 1; \
+	done
 
 ## fmt: reformat everything
 fmt:

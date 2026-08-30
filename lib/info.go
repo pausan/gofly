@@ -14,23 +14,26 @@ import (
 type MigrationState string
 
 const (
-	StatePending        MigrationState = "Pending"
-	StateAboveTarget    MigrationState = "Above Target"
-	StateBelowBaseline  MigrationState = "Below Baseline"
-	StateBaseline       MigrationState = "Baseline"
-	StateIgnored        MigrationState = "Ignored"
-	StateMissingSuccess MigrationState = "Missing"
-	StateMissingFailed  MigrationState = "Failed (Missing)"
-	StateSuccess        MigrationState = "Success"
-	StateUndone         MigrationState = "Undone"
-	StateAvailable      MigrationState = "Available"
-	StateFailed         MigrationState = "Failed"
-	StateOutOfOrder     MigrationState = "Out of Order"
-	StateFutureSuccess  MigrationState = "Future"
-	StateFutureFailed   MigrationState = "Failed (Future)"
-	StateOutdated       MigrationState = "Outdated"
-	StateSuperseded     MigrationState = "Superseded"
-	StateDeleted        MigrationState = "Deleted"
+	StatePending       MigrationState = "Pending"
+	StateAboveTarget   MigrationState = "Above Target"
+	StateBelowBaseline MigrationState = "Below Baseline"
+	// StateBaselineIgnored is the migration sitting exactly at the baseline
+	// version: the baseline row already stands for it, so it never runs
+	StateBaselineIgnored MigrationState = "Ignored (Baseline)"
+	StateBaseline        MigrationState = "Baseline"
+	StateIgnored         MigrationState = "Ignored"
+	StateMissingSuccess  MigrationState = "Missing"
+	StateMissingFailed   MigrationState = "Failed (Missing)"
+	StateSuccess         MigrationState = "Success"
+	StateUndone          MigrationState = "Undone"
+	StateAvailable       MigrationState = "Available"
+	StateFailed          MigrationState = "Failed"
+	StateOutOfOrder      MigrationState = "Out of Order"
+	StateFutureSuccess   MigrationState = "Future"
+	StateFutureFailed    MigrationState = "Failed (Future)"
+	StateOutdated        MigrationState = "Outdated"
+	StateSuperseded      MigrationState = "Superseded"
+	StateDeleted         MigrationState = "Deleted"
 )
 
 // -----------------------------------------------------------------------------
@@ -374,8 +377,16 @@ func pendingState(
 	if target.Kind() == VersionKindReal && version.IsNewerThan(target) {
 		return StateAboveTarget
 	}
-	if appliedBaseline.Kind() == VersionKindReal && version.Compare(appliedBaseline) <= 0 {
-		return StateBelowBaseline
+	if appliedBaseline.Kind() == VersionKindReal {
+		// the file at the baseline version is reported apart from the ones
+		// under it: the baseline row was taken to stand for exactly that
+		// migration, while the older ones were simply never in scope
+		if version.Compare(appliedBaseline) < 0 {
+			return StateBelowBaseline
+		}
+		if version.Compare(appliedBaseline) == 0 {
+			return StateBaselineIgnored
+		}
 	}
 	if version.Compare(highestApplied) < 0 {
 		// an older migration showing up after newer ones have run is only
@@ -429,10 +440,21 @@ func currentVersion(infos []*MigrationInfo) *Version {
 }
 
 // -----------------------------------------------------------------------------
+// isBaselineSkipped
+//
+// Tells whether a migration was left out because of the baseline, either
+// because it sits below it or exactly at it.
+// -----------------------------------------------------------------------------
+func isBaselineSkipped(state MigrationState) bool {
+	return state == StateBelowBaseline || state == StateBaselineIgnored
+}
+
+// -----------------------------------------------------------------------------
 // sortInfos
 //
 // Applied migrations come first, in the order they were applied, followed by
-// everything still to do, in version order.
+// everything still to do, in version order. The migrations the baseline skipped
+// are the exception and lead the table, see MigrationInfoImpl.compareTo.
 // -----------------------------------------------------------------------------
 func sortInfos(infos []*MigrationInfo) {
 	sort.SliceStable(infos, func(i, j int) bool {
@@ -441,6 +463,17 @@ func sortInfos(infos []*MigrationInfo) {
 		if left.Applied != nil && right.Applied != nil {
 			return left.Applied.InstalledRank < right.Applied.InstalledRank
 		}
+
+		// a migration the baseline skipped is listed ahead of the applied ones,
+		// so that the file sitting at the baseline version reads next to the
+		// baseline row rather than trailing the whole history
+		if isBaselineSkipped(left.State) && right.State.IsApplied() {
+			return true
+		}
+		if left.State.IsApplied() && isBaselineSkipped(right.State) {
+			return false
+		}
+
 		if left.Applied != nil {
 			return true
 		}

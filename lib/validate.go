@@ -120,7 +120,7 @@ func validateInfo(info *MigrationInfo, appliedBaseline *Version, context Validat
 	if state == StateUndone || state == StateAboveTarget || state == StateDeleted {
 		return nil
 	}
-	if state == StateAvailable || state == StateBelowBaseline {
+	if state == StateAvailable || state == StateBelowBaseline || state == StateBaselineIgnored {
 		return nil
 	}
 

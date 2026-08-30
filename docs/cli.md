@@ -83,8 +83,17 @@ Undo migrations get no row of their own; they show up in the `Undoable` column
 of the migration they undo.
 
 The states are Flyway's: `Pending`, `Success`, `Failed`, `Out of Order`,
-`Missing`, `Future`, `Ignored`, `Above Target`, `Below Baseline`, `Baseline`,
-`Undone`, `Outdated`, `Superseded`, `Deleted`, `Available`.
+`Missing`, `Future`, `Ignored`, `Above Target`, `Below Baseline`,
+`Ignored (Baseline)`, `Baseline`, `Undone`, `Outdated`, `Superseded`,
+`Deleted`, `Available`.
+
+A baselined database shows the version it was baselined at twice, which is what
+Flyway does too: the `Baseline` row stands for the state the schema was already
+in, and the file at that version is listed separately as `Ignored (Baseline)`
+because it never ran. Only the files strictly below the baseline are `Below
+Baseline`. The two are never paired: Flyway matches history rows to files on
+version *and* type, and a `BASELINE` row has no file behind it, which is why its
+checksum is empty and `validate` leaves both states alone.
 
 ### `validate`
 

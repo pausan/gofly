@@ -4,6 +4,7 @@
 package lib
 
 import (
+	"strconv"
 	"strings"
 	"time"
 )
@@ -162,4 +163,87 @@ func padRight(text string, width int) string {
 	}
 
 	return text + strings.Repeat(" ", padding)
+}
+
+// -----------------------------------------------------------------------------
+// DumpValidationTable
+//
+// Renders what validation actually compared: the file found on disk, the row it
+// was paired with in the schema history, and the checksums of both. This is
+// what `validate --verbose` prints, so that a mismatch can be traced back to a
+// concrete file without guessing.
+// -----------------------------------------------------------------------------
+func DumpValidationTable(service *MigrationInfoService) string {
+	columns := []string{"Category", "Version", "Description", "Local file", "History script", "Checksum (local/db)", "State"}
+	rows := [][]string{}
+
+	for _, info := range service.Infos {
+		rows = append(rows, []string{
+			validationCategory(info),
+			versionText(info.Version()),
+			info.Description(),
+			localFileText(info),
+			historyScriptText(info),
+			checksumPairText(info),
+			string(info.State),
+		})
+	}
+
+	return renderAsciiTable(columns, rows, "No migrations found")
+}
+
+// -----------------------------------------------------------------------------
+// validationCategory
+//
+// Same as the info table, except that undo migrations are listed on their own
+// here since they are validated on their own too.
+// -----------------------------------------------------------------------------
+func validationCategory(info *MigrationInfo) string {
+	if info.Type().IsUndo() {
+		return "Undo"
+	}
+
+	return infoCategory(info)
+}
+
+// -----------------------------------------------------------------------------
+// localFileText
+// -----------------------------------------------------------------------------
+func localFileText(info *MigrationInfo) string {
+	if info.Resolved == nil {
+		return "<not on disk>"
+	}
+
+	return info.Resolved.PhysicalLocation
+}
+
+// -----------------------------------------------------------------------------
+// historyScriptText
+// -----------------------------------------------------------------------------
+func historyScriptText(info *MigrationInfo) string {
+	if info.Applied == nil {
+		return "<not in history>"
+	}
+
+	return info.Applied.Script
+}
+
+// -----------------------------------------------------------------------------
+// checksumPairText
+//
+// The local checksum next to the one recorded in the history table, which is
+// the comparison a CHECKSUM_MISMATCH complains about.
+// -----------------------------------------------------------------------------
+func checksumPairText(info *MigrationInfo) string {
+	local := "-"
+	if info.Resolved != nil {
+		local = strconv.FormatInt(int64(info.Resolved.Checksum), 10)
+	}
+
+	applied := "-"
+	if info.Applied != nil && info.Applied.Checksum != nil {
+		applied = strconv.FormatInt(int64(*info.Applied.Checksum), 10)
+	}
+
+	return local + " / " + applied
 }

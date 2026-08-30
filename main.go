@@ -356,7 +356,8 @@ Examples
   gofly validate info --url=sqlite:./local.db
 
 Migrations
-  --locations=...           Comma separated filesystem:<dir> locations
+  --locations=...           Comma separated directories to scan recursively;
+                            the filesystem: prefix is optional
   --sqlMigrationPrefix=V    Prefix of the versioned migrations
   --undoSqlMigrationPrefix=U
   --repeatableSqlMigrationPrefix=R
@@ -387,7 +388,9 @@ Schema history
 Other
   --configFiles=a.conf,b.conf    Flyway style properties files
   --quiet                        Quiet (-q for short)
-  --verbose                      Verbose (-X for short)
+  --verbose                      Verbose (-X for short); on validate it also
+                                 lists the scanned locations and the file each
+                                 history row was compared against
 
 Every option can also be given as gofly.<name> in a config file, or as
 GOFLY_<NAME> in the environment; the flyway.<name> and FLYWAY_<NAME> spellings

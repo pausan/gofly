@@ -176,3 +176,67 @@ func TestParseKeepsSuffix(t *testing.T) {
 		t.Errorf("prefix %q suffix %q", name.Prefix, name.Suffix)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestDetectSeparatorFindsTheOneInUse
+// -----------------------------------------------------------------------------
+func TestDetectSeparatorFindsTheOneInUse(t *testing.T) {
+	naming := DefaultNaming()
+	names := []string{
+		"V10_initial.sql",
+		"V100_user_activity.sql",
+		"V320_leaderboard_public_name.sql",
+	}
+
+	separator, count, found := DetectSeparator(names, naming)
+	if !found {
+		t.Fatalf("expected a suggestion for %v", names)
+	}
+	if separator != "_" {
+		t.Errorf("detected %q, want %q", separator, "_")
+	}
+	if count != len(names) {
+		t.Errorf("detected %d parseable names, want %d", count, len(names))
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestDetectSeparatorStaysQuietWhenTheConfiguredOneIsBest
+//
+// Nothing should be suggested for a set that already parses: "_" also reads
+// every one of these names, just with the wrong descriptions.
+// -----------------------------------------------------------------------------
+func TestDetectSeparatorStaysQuietWhenTheConfiguredOneIsBest(t *testing.T) {
+	names := []string{"V1__initial.sql", "V2__add_users.sql", "R__refresh_views.sql"}
+
+	if separator, _, found := DetectSeparator(names, DefaultNaming()); found {
+		t.Errorf("suggested %q for names that already parse", separator)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestDetectSeparatorStaysQuietWhenAmbiguous
+//
+// "-" and "--" both rescue this pair, so there is no winner to report.
+// -----------------------------------------------------------------------------
+func TestDetectSeparatorStaysQuietWhenAmbiguous(t *testing.T) {
+	names := []string{"V1--initial.sql", "V2--add_users.sql"}
+
+	if separator, _, found := DetectSeparator(names, DefaultNaming()); found {
+		t.Errorf("suggested %q for an ambiguous set", separator)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestDetectSeparatorIgnoresUnrelatedBreakage
+//
+// A single genuinely malformed name is not a separator problem: no other
+// candidate parses it either.
+// -----------------------------------------------------------------------------
+func TestDetectSeparatorIgnoresUnrelatedBreakage(t *testing.T) {
+	names := []string{"V1__initial.sql", "V__no_version.sql"}
+
+	if separator, _, found := DetectSeparator(names, DefaultNaming()); found {
+		t.Errorf("suggested %q for a name that no separator fixes", separator)
+	}
+}

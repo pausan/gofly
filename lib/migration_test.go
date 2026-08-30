@@ -287,3 +287,94 @@ func TestLoadSQLStripsTheBom(t *testing.T) {
 		t.Error("the BOM should have been stripped before executing")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestLocationPathPrefixIsOptional
+//
+// The filesystem: prefix is what Flyway writes, but a bare directory is far
+// more natural on a command line and has to mean the same thing.
+// -----------------------------------------------------------------------------
+func TestLocationPathPrefixIsOptional(t *testing.T) {
+	cases := []struct {
+		location string
+		expected string
+	}{
+		{"filesystem:./sql", "./sql"},
+		{"./sql", "./sql"},
+		{"sql", "sql"},
+		{"setup/sql/schema", "setup/sql/schema"},
+		{"/srv/app/sql", "/srv/app/sql"},
+		{"  sql  ", "sql"},
+		{"", ""},
+	}
+
+	for _, testCase := range cases {
+		path, err := locationPath(testCase.location)
+		if err != nil {
+			t.Fatalf("locationPath(%q) returned %v", testCase.location, err)
+		}
+		if path != testCase.expected {
+			t.Errorf("locationPath(%q) = %q, want %q", testCase.location, path, testCase.expected)
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestLocationPathRejectsUnsupportedPrefixes
+// -----------------------------------------------------------------------------
+func TestLocationPathRejectsUnsupportedPrefixes(t *testing.T) {
+	for _, location := range []string{"classpath:db/migration", "s3:bucket/sql"} {
+		if _, err := locationPath(location); err == nil {
+			t.Errorf("locationPath(%q) should have failed", location)
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestResolveSuggestsTheSeparatorInUse
+//
+// The bare "could not recognise version number" error points at the version,
+// which is the one part of the name that is not actually wrong.
+// -----------------------------------------------------------------------------
+func TestResolveSuggestsTheSeparatorInUse(t *testing.T) {
+	_, err := resolveIn(t, map[string]string{
+		"V10_initial.sql":        "select 1;",
+		"V100_user_activity.sql": "select 2;",
+		"V320_public_name.sql":   "select 3;",
+	})
+	if err == nil {
+		t.Fatal("expected the resolution to fail")
+	}
+
+	if !strings.Contains(err.Error(), `sqlMigrationSeparator="_"`) {
+		t.Errorf("error does not name the separator in use: %v", err)
+	}
+	if !strings.Contains(err.Error(), "3 of the 3 migration file(s)") {
+		t.Errorf("error does not count the matching files: %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestResolveWithDetectedSeparatorSucceeds
+//
+// The suggestion has to be the setting that actually resolves the migrations.
+// -----------------------------------------------------------------------------
+func TestResolveWithDetectedSeparatorSucceeds(t *testing.T) {
+	config := NewConfig()
+	config.Locations = []string{writeFilesInDir(t, map[string]string{
+		"V10_initial.sql":        "select 1;",
+		"V100_user_activity.sql": "select 2;",
+	})}
+	config.SQLMigrationSeparator = "_"
+
+	resolved, err := ResolveMigrations(config)
+	if err != nil {
+		t.Fatalf("resolution failed: %v", err)
+	}
+	if len(resolved.Versioned) != 2 {
+		t.Fatalf("resolved %d migrations, want 2", len(resolved.Versioned))
+	}
+	if got := resolved.Versioned[1].Description; got != "user activity" {
+		t.Errorf("description %q, want %q", got, "user activity")
+	}
+}

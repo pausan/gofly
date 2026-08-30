@@ -305,3 +305,70 @@ func splitAtFirstSeparator(input string, separator string) (string, string) {
 
 	return input[:index], input[index+len(separator):]
 }
+
+// candidateSeparators are the separators worth suggesting when the configured
+// one does not parse the migrations found on disk. "__" is Flyway's default,
+// "_" and "-" show up in projects that configured it long ago and have since
+// lost track of where it was set.
+var candidateSeparators = []string{"__", "_", "-", "--"}
+
+// -----------------------------------------------------------------------------
+// DetectSeparator
+//
+// Looks for a separator that parses more of the given file names than the
+// configured one does, and returns it along with the number of names it
+// parses.
+//
+// Only a strict winner is reported: when two candidates parse the same number
+// of names the convention in use is ambiguous, and guessing would be worse
+// than saying nothing.
+//
+// This never changes how migrations are read, it only feeds an error message.
+// Picking a separator silently would quietly change what a name means: with
+// "__" the file V1_2__add_users.sql is version 1.2 described "add users",
+// while with "_" it is version 1 described "2  add users". Applying the wrong
+// reading would write the wrong version into the schema history, so the choice
+// stays with whoever knows the project.
+// -----------------------------------------------------------------------------
+func DetectSeparator(fileNames []string, naming Naming) (string, int, bool) {
+	best := ""
+	bestCount := countParseable(fileNames, naming, naming.SQLMigrationSeparator)
+	ambiguous := false
+
+	for _, candidate := range candidateSeparators {
+		if candidate == naming.SQLMigrationSeparator {
+			continue
+		}
+
+		switch count := countParseable(fileNames, naming, candidate); {
+		case count > bestCount:
+			best, bestCount, ambiguous = candidate, count, false
+		case count == bestCount && best != "":
+			ambiguous = true
+		}
+	}
+
+	if best == "" || ambiguous {
+		return "", 0, false
+	}
+
+	return best, bestCount, true
+}
+
+// -----------------------------------------------------------------------------
+// countParseable
+//
+// Counts how many of the names parse cleanly using the given separator.
+// -----------------------------------------------------------------------------
+func countParseable(fileNames []string, naming Naming, separator string) int {
+	naming.SQLMigrationSeparator = separator
+
+	count := 0
+	for _, fileName := range fileNames {
+		if ParseResourceName(fileName, naming).Valid {
+			count++
+		}
+	}
+
+	return count
+}

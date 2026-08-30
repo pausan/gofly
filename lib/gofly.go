@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -263,10 +264,108 @@ func (g *Gofly) Validate() (*ValidateResult, error) {
 			g.History.QualifiedName(), g.Config.FlywayTable)
 	}
 
+	g.logValidationDetail(info, source)
+
 	return info.Validate(ValidateContext{
 		IgnoreMissing: g.Config.IgnoreMissing,
 		IgnoreFuture:  g.Config.IgnoreFuture,
 	}), nil
+}
+
+// -----------------------------------------------------------------------------
+// logValidationDetail
+//
+// Prints, under -verbose, the locations that were scanned and how every file
+// found there was paired with the schema history. Nothing here changes what
+// validation decides, it only shows the decision it is about to make.
+// -----------------------------------------------------------------------------
+func (g *Gofly) logValidationDetail(info *MigrationInfoService, source HistorySource) {
+	if !g.Config.Verbose || g.Config.Quiet || g.Output == nil {
+		return
+	}
+
+	table := g.History.QualifiedName()
+	if source == HistorySourceFlyway {
+		table = g.Config.FlywayTable
+	}
+
+	g.logf("Validating against %s", table)
+	g.logf("Scanning for migrations in:")
+
+	for _, line := range describeScannedLocations(g.Config, info) {
+		g.logf("  %s", line)
+	}
+
+	g.logf("")
+	fmt.Fprint(g.Output, DumpValidationTable(info))
+	g.logf("")
+}
+
+// -----------------------------------------------------------------------------
+// describeScannedLocations
+//
+// One line per configured location: where it points on disk, and how many of
+// the migrations about to be validated came from it. A location that is not
+// there is called out rather than silently skipped, since a typo in it is a
+// common reason for a validation to report nothing at all.
+// -----------------------------------------------------------------------------
+func describeScannedLocations(config *Config, info *MigrationInfoService) []string {
+	lines := make([]string, 0, len(config.Locations))
+
+	for _, location := range config.Locations {
+		root, err := locationPath(location)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("-> %s (%s)", location, err))
+			continue
+		}
+		if root == "" {
+			continue
+		}
+
+		absolute, absErr := filepath.Abs(root)
+		if absErr != nil {
+			absolute = root
+		}
+
+		if stat, statErr := os.Stat(root); statErr != nil || !stat.IsDir() {
+			lines = append(lines, fmt.Sprintf("-> %s -> %s (not found)", location, absolute))
+			continue
+		}
+
+		lines = append(lines, fmt.Sprintf("-> %s -> %s (%d migration(s))",
+			location, absolute, countMigrationsUnder(info, absolute)))
+	}
+
+	if len(lines) == 0 {
+		lines = append(lines, "-> no locations configured")
+	}
+
+	return lines
+}
+
+// -----------------------------------------------------------------------------
+// countMigrationsUnder
+// -----------------------------------------------------------------------------
+func countMigrationsUnder(info *MigrationInfoService, root string) int {
+	count := 0
+
+	for _, migration := range info.Infos {
+		if migration.Resolved == nil {
+			continue
+		}
+
+		path, err := filepath.Abs(migration.Resolved.PhysicalLocation)
+		if err != nil {
+			path = migration.Resolved.PhysicalLocation
+		}
+
+		if relative, err := filepath.Rel(root, path); err == nil &&
+			relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			count++
+		}
+	}
+
+	return count
 }
 
 // MigrateResult reports what a migrate run did

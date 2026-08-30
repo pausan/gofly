@@ -100,6 +100,31 @@ it does not.
 gofly ... validate
 ```
 
+With `--verbose` it first shows what it is about to compare: the locations that
+were scanned, where each of them resolves to on disk, and, for every migration,
+the local file and the history row it was paired with together with both
+checksums. That is usually enough to tell a checksum mismatch apart from a file
+that was picked up from the wrong directory.
+
+```sh
+gofly --url=sqlite:./local.db --locations=filesystem:sql validate --verbose
+```
+
+```
+Validating against "gofly_schema_history"
+Scanning for migrations in:
+  -> filesystem:sql -> /srv/app/sql (3 migration(s))
+  -> filesystem:extra -> /srv/app/extra (not found)
+
++-----------+---------+--------------+--------------------------+----------------------+-----------------------+---------+
+| Category  | Version | Description  | Local file               | History script       | Checksum (local/db)   | State   |
++-----------+---------+--------------+--------------------------+----------------------+-----------------------+---------+
+| Versioned | 1       | create users | sql/V1__create_users.sql | V1__create_users.sql | 560725651 / -7233374  | Success |
+| Versioned | 2       | add email    | sql/V2__add_email.sql    | V2__add_email.sql    | 273465196 / 273465196 | Success |
+| Versioned | 3       | pending      | sql/V3__pending.sql      | <not in history>     | -295727525 / -        | Pending |
++-----------+---------+--------------+--------------------------+----------------------+-----------------------+---------+
+```
+
 ### `baseline`
 
 Marks an existing database as already migrated up to `--baselineVersion`, so that
@@ -157,13 +182,33 @@ Url formats are listed in [configuration.md](configuration.md#database-urls).
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--locations` | `filesystem:sql` | Comma separated `filesystem:<dir>` locations, scanned recursively |
+| `--locations` | `filesystem:sql` | Comma separated directories, scanned recursively; the `filesystem:` prefix is optional, so `--locations=sql` and `--locations=filesystem:sql` mean the same |
 | `--sqlMigrationPrefix` | `V` | Prefix of versioned migrations |
 | `--undoSqlMigrationPrefix` | `U` | Prefix of undo migrations |
 | `--repeatableSqlMigrationPrefix` | `R` | Prefix of repeatable migrations |
 | `--sqlMigrationSeparator` | `__` | Between the version and the description |
 | `--sqlMigrationSuffixes` | `.sql` | Comma separated, matched case insensitively |
 | `--encoding` | `UTF-8` | Accepted for compatibility; gofly always reads UTF-8 |
+
+A project that set `sqlMigrationSeparator` long ago and has since lost the
+config file only sees a complaint about the version number, which is the one
+part of the name that is not wrong:
+
+```
+ERROR: Invalid versioned migration name format: V100_user_activity.sql (could not recognise version number 100_user_activity)
+-> 34 of the 34 migration file(s) found parse with sqlMigrationSeparator="_" rather than the configured "__", add --sqlMigrationSeparator=_ if that is the convention this project uses
+```
+
+The second line is worked out by re-reading every name that matched a prefix
+with each of the separators gofly knows about (`__`, `_`, `-`, `--`) and
+reporting the one that parses strictly more of them than the configured one.
+Two candidates that do equally well are reported as no suggestion at all.
+
+gofly never switches separator on its own, because the same name means
+different things under each: `V1_2__add_users.sql` is version 1.2 described
+"add users" with `__`, and version 1 described "2  add users" with `_`.
+Guessing wrong would write the wrong version into the schema history, so the
+setting stays yours to make.
 
 ### Behaviour
 
@@ -218,7 +263,7 @@ lets the same migration be deployed to several environments.
 |---|---|---|
 | `--configFiles` | discovered, see [configuration.md](configuration.md) | Comma separated properties files |
 | `--quiet` | off | Quiet, `--q` for short |
-| `--verbose` | off | Verbose, `--X` for short |
+| `--verbose` | off | Verbose, `--X` for short; see [`validate`](#validate) |
 
 These three take no value. `--q` and `--X` are Flyway's spellings and keep
 working.

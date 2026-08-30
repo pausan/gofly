@@ -72,6 +72,11 @@ func (r *ResolvedMigrations) UndoFor(version *Version) *ResolvedMigration {
 func ResolveMigrations(config *Config) (*ResolvedMigrations, error) {
 	resolved := &ResolvedMigrations{}
 
+	// every name that matched a prefix, kept so that a name failure can be
+	// explained against the whole set rather than the one file that tripped
+	candidateNames := []string{}
+	var nameError error
+
 	seenVersioned := map[string]string{}
 	seenUndo := map[string]string{}
 	seenRepeatable := map[string]string{}
@@ -114,12 +119,19 @@ func ResolveMigrations(config *Config) (*ResolvedMigrations, error) {
 			if name.Type == ResourceTypeCallback {
 				return nil
 			}
+			// files that match no prefix at all are simply not migrations
+			if name.Type == ResourceTypeUnknown {
+				return nil
+			}
+			candidateNames = append(candidateNames, entry.Name())
+
 			if !name.Valid {
-				// files that match no prefix at all are simply not migrations
-				if name.Type == ResourceTypeUnknown {
-					return nil
+				// the scan carries on so that DetectSeparator below sees every
+				// name; the first failure is still the one reported
+				if nameError == nil {
+					nameError = fmt.Errorf("%s", name.InvalidCause)
 				}
-				return fmt.Errorf("%s", name.InvalidCause)
+				return nil
 			}
 
 			checksum, err := ChecksumFile(path)
@@ -186,6 +198,10 @@ func ResolveMigrations(config *Config) (*ResolvedMigrations, error) {
 		}
 	}
 
+	if nameError != nil {
+		return nil, withSeparatorHint(nameError, candidateNames, config.Naming)
+	}
+
 	sortByVersion(resolved.Versioned)
 	sortByVersion(resolved.Undo)
 	sort.SliceStable(resolved.Repeatable, func(i, j int) bool {
@@ -193,6 +209,28 @@ func ResolveMigrations(config *Config) (*ResolvedMigrations, error) {
 	})
 
 	return resolved, nil
+}
+
+// -----------------------------------------------------------------------------
+// withSeparatorHint
+//
+// Adds a "you probably meant this separator" line to a name error. A project
+// that set sqlMigrationSeparator years ago and has since lost the config file
+// is otherwise only told that a version number looks wrong, which says nothing
+// about the real cause.
+//
+// The separator is never applied on its own, see DetectSeparator for why.
+// -----------------------------------------------------------------------------
+func withSeparatorHint(err error, fileNames []string, naming Naming) error {
+	separator, count, found := DetectSeparator(fileNames, naming)
+	if !found {
+		return err
+	}
+
+	return fmt.Errorf(
+		"%w\n-> %d of the %d migration file(s) found parse with sqlMigrationSeparator=%q rather than the configured %q, add --sqlMigrationSeparator=%s if that is the convention this project uses",
+		err, count, len(fileNames), separator, naming.SQLMigrationSeparator, separator,
+	)
 }
 
 // -----------------------------------------------------------------------------
@@ -239,7 +277,8 @@ func hasMigrationSuffix(fileName string, suffixes []string) bool {
 // locationPath
 //
 // Resolves a Flyway location into a directory. Only filesystem locations make
-// sense here, classpath ones exist solely for the Java edition.
+// sense here, classpath ones exist solely for the Java edition. The
+// filesystem: prefix is optional: a bare path is read as one.
 // -----------------------------------------------------------------------------
 func locationPath(location string) (string, error) {
 	trimmed := strings.TrimSpace(location)
@@ -254,7 +293,7 @@ func locationPath(location string) (string, error) {
 		return "", fmt.Errorf("classpath locations are not supported by gofly, use filesystem:<dir> instead of %s", trimmed)
 	}
 	if strings.Contains(trimmed, ":") && !filepath.IsAbs(trimmed) && !strings.HasPrefix(trimmed, ".") {
-		return "", fmt.Errorf("unsupported location prefix in %s, use filesystem:<dir>", trimmed)
+		return "", fmt.Errorf("unsupported location prefix in %s, use filesystem:<dir> or a plain directory path", trimmed)
 	}
 
 	return trimmed, nil

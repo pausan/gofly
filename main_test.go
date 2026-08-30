@@ -304,15 +304,17 @@ func TestRunPrintsUsage(t *testing.T) {
 // -----------------------------------------------------------------------------
 // TestRunAnswersHelpAndVersionWhateverTheEnvironmentSays
 //
-// FLYWAY_DIR is a real Flyway property that gofly does not implement, so it is
-// enough to make any other command fail. Asking for help has to work anyway.
+// FLYWAY_DIR is what the Java edition's install directory is exported as, not a
+// property, and any container that has flyway on it carries one. gofly has to
+// walk past it rather than let it break every command.
 // -----------------------------------------------------------------------------
 func TestRunAnswersHelpAndVersionWhateverTheEnvironmentSays(t *testing.T) {
 	withoutDefaultConfigFiles(t)
 	t.Setenv("FLYWAY_DIR", "/some/place")
 
-	if code := run([]string{"info"}, &bytes.Buffer{}, &bytes.Buffer{}); code == 0 {
-		t.Error("an unknown environment property should still fail a real command")
+	stderr := &bytes.Buffer{}
+	if code := run([]string{"info", "-url=jdbc:sqlite:" + filepath.Join(t.TempDir(), "e.db")}, &bytes.Buffer{}, stderr); code != 0 {
+		t.Errorf("an unrelated FLYWAY_* variable should not fail a command: %s", stderr.String())
 	}
 
 	for _, args := range [][]string{{}, {"help"}, {"--help"}, {"-h"}, {"-?"}} {

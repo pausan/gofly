@@ -7,6 +7,7 @@ package lib
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -85,6 +86,10 @@ type Config struct {
 
 	// warnedOrigins keeps the deprecation warning down to one per source
 	warnedOrigins map[string]bool
+
+	// warnedMixing keeps the namespace mixing warning down to one per run,
+	// since every later property in the losing namespace would repeat it
+	warnedMixing bool
 }
 
 // Origin says where a setting came from. Source identifies the file or channel
@@ -122,6 +127,13 @@ type namespaceUse struct {
 	property string
 	location string
 }
+
+// ErrUnknownProperty is what SetFrom returns when the property name matches
+// nothing gofly understands. A config file or the command line names a property
+// on purpose, so there a typo stays fatal; the environment is shared with the
+// rest of the machine and is checked against this, since plenty of variables
+// merely start with FLYWAY_ without being settings.
+var ErrUnknownProperty = errors.New("unknown configuration property")
 
 // Property namespaces a setting may be written in
 const (
@@ -183,18 +195,33 @@ func (c *Config) Set(key string, value string) error {
 //
 // A property may be written bare (url), in the gofly namespace (gofly.url) or
 // in the deprecated flyway one (flyway.url). The flyway namespace still works,
-// so an existing flyway.conf needs no editing, but it warns, and the two
-// namespaces cannot be mixed: a configuration half migrated is a configuration
-// nobody can reason about.
+// so an existing flyway.conf needs no editing, but it warns, and so does a
+// configuration that uses both namespaces at once.
+//
+// The namespace is recorded only once the property has turned out to be a real
+// one, so that an unrelated FLYWAY_HOME sitting in the environment never counts
+// as use of the flyway namespace.
 // -----------------------------------------------------------------------------
 func (c *Config) SetFrom(key string, value string, origin Origin) error {
-	key = strings.TrimSpace(key)
+	namespace, key := splitNamespace(strings.TrimSpace(key))
 
-	namespace, key := splitNamespace(key)
-	if err := c.recordNamespace(namespace, key, origin); err != nil {
+	if err := c.applyProperty(key, value); err != nil {
 		return err
 	}
 
+	c.recordNamespace(namespace, key, origin)
+
+	return nil
+}
+
+// -----------------------------------------------------------------------------
+// applyProperty
+//
+// Writes one bare property into the configuration. A name that matches nothing
+// comes back as ErrUnknownProperty with the configuration untouched, which is
+// what lets LoadEnvironment skip the variables that are not ours.
+// -----------------------------------------------------------------------------
+func (c *Config) applyProperty(key string, value string) error {
 	// placeholder names keep their case, only the prefix is matched loosely
 	if len(key) > len("placeholders.") && strings.EqualFold(key[:len("placeholders.")], "placeholders.") {
 		c.Placeholders[key[len("placeholders."):]] = value
@@ -279,7 +306,7 @@ func (c *Config) SetFrom(key string, value string, origin Origin) error {
 		return nil
 
 	default:
-		return fmt.Errorf("unknown configuration property: %s", key)
+		return fmt.Errorf("%w: %s", ErrUnknownProperty, key)
 	}
 
 	return nil
@@ -309,11 +336,15 @@ func splitNamespace(key string) (string, string) {
 // recordNamespace
 //
 // Notes which namespace a property was written in, warns the first time the
-// deprecated one shows up, and refuses to carry on once both have been used.
+// deprecated one shows up, and warns again the first time both turn out to be
+// in use. Mixing is worth saying out loud, because a half renamed configuration
+// is hard to reason about, but it is never ambiguous: precedence decides, the
+// same as it would within one namespace. Refusing to run over it only stranded
+// people whose real problem was a stray FLYWAY_* variable they did not set.
 // -----------------------------------------------------------------------------
-func (c *Config) recordNamespace(namespace string, key string, origin Origin) error {
+func (c *Config) recordNamespace(namespace string, key string, origin Origin) {
 	if namespace == namespaceNone {
-		return nil
+		return
 	}
 
 	other := NamespaceGofly
@@ -321,12 +352,14 @@ func (c *Config) recordNamespace(namespace string, key string, origin Origin) er
 		other = NamespaceFlyway
 	}
 
-	if clash, mixed := c.namespaceOrigin[other]; mixed {
-		return fmt.Errorf(
-			"cannot mix the %s.* and %s.* property namespaces: %s.%s comes from %s, "+
-				"while %s was already set from %s. Pick one namespace and use it throughout, "+
+	if clash, mixed := c.namespaceOrigin[other]; mixed && !c.warnedMixing {
+		c.warnedMixing = true
+		c.Warnings = append(c.Warnings, fmt.Sprintf(
+			"the %s.* and %s.* property namespaces are both in use: %s.%s comes from %s, "+
+				"while %s was already set from %s. Both still apply, and the usual precedence "+
+				"decides between them, but pick one namespace and use it throughout, "+
 				"%s.* is the one to move to",
-			other, namespace, namespace, key, origin.Location, clash.property, clash.location, NamespaceGofly)
+			other, namespace, namespace, key, origin.Location, clash.property, clash.location, NamespaceGofly))
 	}
 
 	if _, seen := c.namespaceOrigin[namespace]; !seen {
@@ -340,12 +373,10 @@ func (c *Config) recordNamespace(namespace string, key string, origin Origin) er
 		c.warnedOrigins[origin.Source] = true
 		c.Warnings = append(c.Warnings, fmt.Sprintf(
 			"%s still uses the deprecated %s.* namespace; rename those properties to %s.* "+
-				"(%s.url becomes %s.url, and so on). They keep working for now, but the two "+
-				"namespaces cannot be mixed",
+				"(%s.url becomes %s.url, and so on). They keep working for now, but mixing "+
+				"the two namespaces warns as well",
 			origin.Source, NamespaceFlyway, NamespaceGofly, NamespaceFlyway, NamespaceGofly))
 	}
-
-	return nil
 }
 
 // -----------------------------------------------------------------------------
@@ -394,6 +425,11 @@ func (c *Config) LoadConfigFile(path string) error {
 // Applies FLYWAY_* and GOFLY_* environment variables. FLYWAY_SQL_MIGRATION_PREFIX
 // maps onto sqlMigrationPrefix, and FLYWAY_PLACEHOLDERS_MY_KEY onto the
 // placeholder my_key, exactly like the Flyway command line.
+//
+// Variables that name no known property are ignored. The environment is not
+// written for gofly alone: a machine with the Java edition installed exports
+// FLYWAY_DIR and FLYWAY_HOME, which point at the install and are not settings
+// at all, and refusing to run because of one is no help to anybody.
 // -----------------------------------------------------------------------------
 func (c *Config) LoadEnvironment(environment []string) error {
 	for _, entry := range environment {
@@ -420,6 +456,9 @@ func (c *Config) LoadEnvironment(environment []string) error {
 		// the environment carries the namespace in the variable name itself, so
 		// FLYWAY_URL counts as flyway.url for the deprecation and mixing rules
 		if err := c.SetFrom(namespace+"."+key, value, EnvironmentOrigin(name)); err != nil {
+			if errors.Is(err, ErrUnknownProperty) {
+				continue
+			}
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}

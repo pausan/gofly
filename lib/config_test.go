@@ -2,6 +2,7 @@
 package lib
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -88,21 +89,32 @@ func TestConfigDoesNotWarnAboutTheGoflyNamespace(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// TestConfigRefusesToMixNamespaces
+// TestConfigWarnsAboutMixedNamespacesButAppliesThem
+//
+// Mixing the two namespaces is worth saying out loud, but it is not ambiguous,
+// so both properties have to land.
 // -----------------------------------------------------------------------------
-func TestConfigRefusesToMixNamespaces(t *testing.T) {
+func TestConfigWarnsAboutMixedNamespacesButAppliesThem(t *testing.T) {
 	// flyway first, then gofly
 	config := NewConfig()
 	if err := config.SetFrom("flyway.url", "x", FileOrigin("a.conf", 1)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	err := config.SetFrom("gofly.user", "root", FileOrigin("a.conf", 2))
-	if err == nil {
-		t.Fatal("mixing the namespaces should have been refused")
+	if err := config.SetFrom("gofly.user", "root", FileOrigin("a.conf", 2)); err != nil {
+		t.Fatalf("mixing the namespaces should warn, not fail: %v", err)
 	}
-	for _, expected := range []string{"cannot mix", "flyway.url", "a.conf:1", "a.conf:2"} {
-		if !strings.Contains(err.Error(), expected) {
-			t.Errorf("the error should mention %q: %v", expected, err)
+
+	if config.URL != "x" || config.User != "root" {
+		t.Errorf("both properties should have been applied: %q / %q", config.URL, config.User)
+	}
+
+	mixing := findWarning(config.Warnings, "both in use")
+	if mixing == "" {
+		t.Fatalf("mixing the namespaces should have warned: %v", config.Warnings)
+	}
+	for _, expected := range []string{"flyway.url", "a.conf:1", "a.conf:2"} {
+		if !strings.Contains(mixing, expected) {
+			t.Errorf("the warning should mention %q: %s", expected, mixing)
 		}
 	}
 
@@ -111,9 +123,51 @@ func TestConfigRefusesToMixNamespaces(t *testing.T) {
 	if err := config.SetFrom("gofly.url", "x", FileOrigin("b.conf", 1)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := config.SetFrom("flyway.user", "root", FileOrigin("b.conf", 2)); err == nil {
-		t.Error("mixing the namespaces should have been refused")
+	if err := config.SetFrom("flyway.user", "root", FileOrigin("b.conf", 2)); err != nil {
+		t.Fatalf("mixing the namespaces should warn, not fail: %v", err)
 	}
+	if config.URL != "x" || config.User != "root" {
+		t.Errorf("both properties should have been applied: %q / %q", config.URL, config.User)
+	}
+	if findWarning(config.Warnings, "both in use") == "" {
+		t.Errorf("mixing the namespaces should have warned: %v", config.Warnings)
+	}
+
+	// however many properties follow, the mixing is only worth saying once
+	config.SetFrom("flyway.table", "t", FileOrigin("b.conf", 3))
+	config.SetFrom("flyway.encoding", "UTF-8", FileOrigin("b.conf", 4))
+	if count := countWarnings(config.Warnings, "both in use"); count != 1 {
+		t.Errorf("got %d mixing warnings, want exactly one: %v", count, config.Warnings)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// findWarning
+//
+// Returns the first warning containing needle, or "" when there is none.
+// -----------------------------------------------------------------------------
+func findWarning(warnings []string, needle string) string {
+	for _, warning := range warnings {
+		if strings.Contains(warning, needle) {
+			return warning
+		}
+	}
+
+	return ""
+}
+
+// -----------------------------------------------------------------------------
+// countWarnings
+// -----------------------------------------------------------------------------
+func countWarnings(warnings []string, needle string) int {
+	count := 0
+	for _, warning := range warnings {
+		if strings.Contains(warning, needle) {
+			count++
+		}
+	}
+
+	return count
 }
 
 // -----------------------------------------------------------------------------
@@ -142,8 +196,24 @@ func TestConfigBareNamesMixWithAnything(t *testing.T) {
 func TestConfigRejectsUnknownProperties(t *testing.T) {
 	config := NewConfig()
 
-	if err := config.Set("flyway.notAThing", "x"); err == nil {
-		t.Error("an unknown property should have been rejected")
+	err := config.Set("flyway.notAThing", "x")
+	if err == nil {
+		t.Fatal("an unknown property should have been rejected")
+	}
+	if !errors.Is(err, ErrUnknownProperty) {
+		t.Errorf("the error should be an ErrUnknownProperty: %v", err)
+	}
+
+	// a file names its properties on purpose, so a typo stays fatal there too:
+	// only the environment gets the benefit of the doubt
+	path := writeTempFile(t, "typo.conf", "gofly.notAThing=x\n")
+	if err := config.LoadConfigFile(path); err == nil {
+		t.Error("an unknown property in a config file should have been rejected")
+	}
+
+	// and an unknown name never claims its namespace
+	if _, claimed := config.namespaceOrigin[NamespaceFlyway]; claimed {
+		t.Error("an unknown property should not count as use of a namespace")
 	}
 }
 
@@ -423,20 +493,55 @@ func TestConfigReadsTheDeprecatedEnvironmentNamespace(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// TestConfigRefusesToMixNamespacesInTheEnvironment
+// TestConfigWarnsAboutMixedNamespacesInTheEnvironment
 // -----------------------------------------------------------------------------
-func TestConfigRefusesToMixNamespacesInTheEnvironment(t *testing.T) {
+func TestConfigWarnsAboutMixedNamespacesInTheEnvironment(t *testing.T) {
 	config := NewConfig()
 
 	err := config.LoadEnvironment([]string{
 		"FLYWAY_URL=jdbc:sqlite:x.db",
 		"GOFLY_USER=root",
 	})
-	if err == nil {
-		t.Fatal("mixing FLYWAY_* and GOFLY_* should have been refused")
+	if err != nil {
+		t.Fatalf("mixing FLYWAY_* and GOFLY_* should warn, not fail: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cannot mix") {
-		t.Errorf("unexpected error: %v", err)
+
+	if config.URL != "jdbc:sqlite:x.db" || config.User != "root" {
+		t.Errorf("both variables should have been read: %q / %q", config.URL, config.User)
+	}
+	if findWarning(config.Warnings, "both in use") == "" {
+		t.Errorf("mixing the namespaces should have warned: %v", config.Warnings)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestConfigIgnoresEnvironmentVariablesThatNameNoProperty
+//
+// The environment belongs to the whole machine. A box with the Java edition
+// installed exports FLYWAY_DIR and FLYWAY_HOME pointing at the install, and
+// neither is a setting: gofly has to walk past them rather than refuse to run.
+// They must not claim the flyway namespace either, or the next GOFLY_* variable
+// would warn about mixing that nobody asked for.
+// -----------------------------------------------------------------------------
+func TestConfigIgnoresEnvironmentVariablesThatNameNoProperty(t *testing.T) {
+	config := NewConfig()
+
+	err := config.LoadEnvironment([]string{
+		"FLYWAY_DIR=/usr/local/lib/flyway-6.3.1",
+		"FLYWAY_HOME=/usr/local/lib/flyway-6.3.1",
+		"FLYWAY_VERSION=6.3.1",
+		"GOFLY_DEBUG=1",
+		"GOFLY_URL=jdbc:sqlite:x.db",
+	})
+	if err != nil {
+		t.Fatalf("unrelated FLYWAY_*/GOFLY_* variables should be ignored: %v", err)
+	}
+
+	if config.URL != "jdbc:sqlite:x.db" {
+		t.Errorf("the real property was not read: %q", config.URL)
+	}
+	if len(config.Warnings) != 0 {
+		t.Errorf("ignored variables should warn about nothing: %v", config.Warnings)
 	}
 }
 
@@ -447,12 +552,20 @@ func TestConfigFileMixingNamespacesIsReported(t *testing.T) {
 	path := writeTempFile(t, "mixed.conf", "flyway.url=jdbc:sqlite:x.db\ngofly.user=root\n")
 
 	config := NewConfig()
-	err := config.LoadConfigFile(path)
-	if err == nil {
-		t.Fatal("a config file mixing namespaces should have been rejected")
+	if err := config.LoadConfigFile(path); err != nil {
+		t.Fatalf("a config file mixing namespaces should warn, not fail: %v", err)
 	}
-	if !strings.Contains(err.Error(), ":2:") || !strings.Contains(err.Error(), "cannot mix") {
-		t.Errorf("the error should point at line 2: %v", err)
+
+	if config.URL != "jdbc:sqlite:x.db" || config.User != "root" {
+		t.Errorf("both lines should have been applied: %q / %q", config.URL, config.User)
+	}
+
+	mixing := findWarning(config.Warnings, "both in use")
+	if mixing == "" {
+		t.Fatalf("mixing the namespaces should have warned: %v", config.Warnings)
+	}
+	if !strings.Contains(mixing, ":2") {
+		t.Errorf("the warning should point at line 2: %s", mixing)
 	}
 }
 

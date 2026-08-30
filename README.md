@@ -117,8 +117,10 @@ gofly.baselineVersion=10
 
 An existing `flyway.conf` works unchanged: the `flyway.*` properties and the
 `FLYWAY_*` environment variables are still read. They warn that `gofly.*` is
-the name to move to, and the two namespaces cannot be mixed — a half-renamed
-configuration is one nobody can reason about.
+the name to move to, and using both namespaces at once warns too — a half-renamed
+configuration is one nobody enjoys reading — but everything still applies.
+`FLYWAY_*` variables that name no property, such as the `FLYWAY_DIR` and
+`FLYWAY_HOME` exported by a Java Flyway install, are ignored.
 
 ### Database urls
 

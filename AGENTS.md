@@ -109,16 +109,24 @@ used for the `version` column.
 trailing zero parts are trimmed. Use `Version.CanonicalKey()` for map keys and
 duplicate detection, never `Version.String()`, which keeps the text as written.
 
-### 8. flyway.* is deprecated, and the namespaces never mix
+### 8. flyway.* is deprecated, and mixing the namespaces warns
 
 Config properties and environment variables come in three forms: bare (`url`),
-`gofly.*` (preferred) and `flyway.*` (deprecated, warns once per source). Once
-one namespace has been used, the other is an error. Bare names belong to
-neither, which is why the command line never trips the rule.
+`gofly.*` (preferred) and `flyway.*` (deprecated, warns once per source). Using
+both namespaces warns once per run and applies both: mixing is untidy, not
+ambiguous, and precedence settles it. Bare names belong to neither, which is why
+the command line never trips the rule.
 
-`Config.SetFrom` takes an `Origin`, whose `Source` deduplicates the warning per
-file and whose `Location` pins the exact line for the error. Anything new that
+`Config.SetFrom` takes an `Origin`, whose `Source` deduplicates the deprecation
+warning per file and whose `Location` pins the exact line. Anything new that
 reads configuration must go through `SetFrom` with a real origin.
+
+`SetFrom` applies the property first and records the namespace only once the
+name turns out to be real, so an unknown property never claims a namespace.
+Unknown names come back wrapped in `ErrUnknownProperty`; `LoadEnvironment` skips
+those, because `FLYWAY_DIR` and `FLYWAY_HOME` are exported by any machine with
+the Java edition on it and name no setting. Config files and the command line
+still treat an unknown property as fatal.
 
 ## Testing
 
@@ -237,3 +245,21 @@ behaviour changes, both need updating: `docs/cli.md` for options and commands,
 `docs/configuration.md` for anything about config sources,
 `docs/migrations.md` for naming, checksums and transactions,
 `docs/compatibility.md` for anything that matches or diverges from Flyway.
+
+## AI Guidelines Summary
+
+When working on this codebase, adhere to the following principles:
+
+1.  **Think Before Coding**: State assumptions, present tradeoffs, and ask for
+    clarification if uncertain. Don't overcomplicate.
+2.  **Simplicity First**: Write the minimum code required. No speculative
+    features or unnecessary abstractions.
+3.  **Surgical Changes**: Touch only what is necessary. Match existing style.
+    Clean up only the dead code created by your changes.
+4.  **Goal-Driven Execution**: Define clear, verifiable success criteria (e.g.,
+    write a test, make it pass) and loop until verified. Provide a brief plan
+    for multi-step tasks.
+5.  **Use clear, direct, natural language**: Explain things simply and
+    precisely. Avoid overly formal, complex, or elaborate wording. Prefer common
+    words, concise sentences, and concrete explanations. Prioritize clarity over
+    sounding sophisticated.

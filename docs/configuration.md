@@ -75,27 +75,32 @@ prints one warning per file:
 ```
 WARNING: /etc/flyway.conf still uses the deprecated flyway.* namespace; rename
 those properties to gofly.* (flyway.url becomes gofly.url, and so on). They keep
-working for now, but the two namespaces cannot be mixed
+working for now, but mixing the two namespaces warns as well
 ```
 
 Renaming is a search and replace of `flyway.` to `gofly.`; nothing else changes.
 
-### The two namespaces cannot be mixed
+### Mixing the two namespaces warns
 
-Once a `flyway.*` property has been read, a `gofly.*` one is an error, and the
-other way round:
+Once a `flyway.*` property has been read, a `gofly.*` one warns, and the other
+way round:
 
 ```
-ERROR: /etc/app.conf:5: cannot mix the flyway.* and gofly.* property namespaces:
+WARNING: the flyway.* and gofly.* property namespaces are both in use:
 gofly.user comes from /etc/app.conf:5, while flyway.url was already set from
-/etc/app.conf:2. Pick one namespace and use it throughout, gofly.* is the one to
-move to
+/etc/app.conf:2. Both still apply, and the usual precedence decides between
+them, but pick one namespace and use it throughout, gofly.* is the one to move
+to
 ```
+
+Both properties are applied: mixing is untidy, not ambiguous, and the precedence
+above settles which value wins exactly as it would within one namespace. The
+warning is printed once per run, however many properties are involved.
 
 This holds across every source gofly reads, so a `flyway.conf` plus a
-`GOFLY_PASSWORD` in the environment is refused as well. A half-renamed
-configuration is one nobody can reason about, and the whole point of the rule is
-that the migration is finished rather than perpetual.
+`GOFLY_PASSWORD` in the environment warns as well. A half-renamed configuration
+is one nobody enjoys reading, and the point of the warning is that the migration
+gets finished rather than staying perpetual.
 
 Bare property names belong to neither namespace and mix with anything, which is
 why the command line never trips the rule.
@@ -117,7 +122,14 @@ export GOFLY_PLACEHOLDERS_ENV=production      # sets the placeholder "env"
 the flyway namespace for the mixing rule above.
 
 Variables that match no known property are ignored, so an unrelated
-`FLYWAY_HOME` or `GOFLY_DEBUG` in the environment does no harm.
+`FLYWAY_HOME` or `GOFLY_DEBUG` in the environment does no harm. This matters on
+any machine that also has the Java edition installed, since its own
+`FLYWAY_DIR` and `FLYWAY_HOME` point at the install rather than naming a
+setting. Being ignored, they do not count as use of the flyway namespace
+either, so they never provoke the mixing warning.
+
+A typo is only forgiven in the environment. A config file and the command line
+name their properties deliberately, so an unknown one there is still an error.
 
 ## Database urls
 

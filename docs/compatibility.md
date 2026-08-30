@@ -86,7 +86,7 @@ first run gofly:
 3. carries on from there.
 
 `flyway_schema_history` is only ever read. It is never written to and never
-dropped, so going back to Flyway remains possible. `-importFromFlyway=false`
+dropped, so going back to Flyway remains possible. `--importFromFlyway=false`
 skips the import.
 
 Because the checksums are identical, a migration that was edited after Flyway
@@ -98,7 +98,7 @@ over yet they read `flyway_schema_history` directly and say so, so you can check
 compatibility before committing to the switch:
 
 ```sh
-gofly -url=... -locations=filesystem:./sql validate
+gofly --url=... --locations=filesystem:./sql validate
 ```
 
 ## Where gofly differs on purpose
@@ -107,8 +107,8 @@ gofly -url=... -locations=filesystem:./sql validate
 |---|---|---|---|
 | History table | `flyway_schema_history` in the default schema | `gofly_schema_history`, in the `gofly` schema where there is one | The two tools can manage the same database side by side during a migration |
 | Undo | Teams edition only | included | It is a small feature and a useful one |
-| `-group` | Teams edition only | included | All-or-nothing is the behaviour most people expect |
-| Encoding | `-encoding`, `-detectEncoding` | always UTF-8 | Anything else in a migration in 2026 is a bug worth fixing at the source |
+| `--group` | Teams edition only | included | All-or-nothing is the behaviour most people expect |
+| Encoding | `--encoding`, `--detectEncoding` | always UTF-8 | Anything else in a migration in 2026 is a bug worth fixing at the source |
 
 ## Deliberately left out
 
@@ -138,15 +138,15 @@ oversights:
 
 - **`ignoreMigrationPatterns`** — the modern, expressive replacement for
   `ignoreMissingMigrations` and friends. gofly implements the older, blunter
-  `-ignoreMissingMigrations` and `-ignoreFutureMigrations`, which cover what
+  `--ignoreMissingMigrations` and `--ignoreFutureMigrations`, which cover what
   people actually use.
-- **`-mixed`** — accepted and ignored. gofly does not attempt to separate
+- **`--mixed`** — accepted and ignored. gofly does not attempt to separate
   transactional from non-transactional statements within one migration.
-- **`-cleanOnValidationError`** — depends on `clean`.
-- **`-errorOverrides`, `-batch`, `-outputQueryResults`, `-lockRetryCount`** —
+- **`--cleanOnValidationError`** — depends on `clean`.
+- **`--errorOverrides`, `--batch`, `--outputQueryResults`, `--lockRetryCount`** —
   Teams features or tuning knobs for scale gofly is not aiming at.
-- **`-driver`, `-jarDirs`, `-resolvers`, `-callbacks`, `-skipDefaultResolvers`,
-  `-skipDefaultCallbacks`, `-errorHandlers`, `-dryRunOutput`** — accepted and
+- **`--driver`, `--jarDirs`, `--resolvers`, `--callbacks`, `--skipDefaultResolvers`,
+  `--skipDefaultCallbacks`, `--errorHandlers`, `--dryRunOutput`** — accepted and
   ignored, since they only ever meant anything to the Java edition and old
   command lines should keep working.
 

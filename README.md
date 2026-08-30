@@ -23,7 +23,7 @@ migrated by gofly can still be read by Flyway.
 - **Flyway checksums** — bit for bit identical, so existing history stays valid.
 - **Checksum validation** — a migration edited after being applied stops
   everything, with the same message Flyway prints.
-- **All-or-nothing migrations** — `-group=true` runs the whole batch in one
+- **All-or-nothing migrations** — `--group=true` runs the whole batch in one
   transaction.
 - **Its own history schema**, and a one-off import of an existing Flyway history
   the first time it runs against a database.
@@ -72,9 +72,9 @@ go build -tags goflymin,db_pg,db_sqlite .  # postgres and sqlite
 ## Use
 
 ```sh
-gofly -url=jdbc:postgresql://localhost:5432/mydb \
-      -user=admin -password=secret \
-      -locations=filesystem:./sql \
+gofly --url=jdbc:postgresql://localhost:5432/mydb \
+      --user=admin --password=secret \
+      --locations=filesystem:./sql \
       migrate
 ```
 
@@ -82,8 +82,12 @@ Commands: `migrate`, `undo`, `info`, `validate`, `baseline`, `repair`.
 Run `gofly` with no arguments for the full list of options, or see
 **[docs/cli.md](docs/cli.md)**.
 
+Options are `--key=value`. Flyway's single dash works everywhere too, so an
+existing `flyway -url=… -locations=… migrate` command line runs under gofly with
+only the binary name changed.
+
 ```
-$ gofly -url=jdbc:sqlite:app.db -locations=filesystem:./sql info
+$ gofly --url=jdbc:sqlite:app.db --locations=filesystem:./sql info
 
 Schema version: 3
 
@@ -133,7 +137,7 @@ mean the same thing:
 So a full run needs no config file at all:
 
 ```bash
-gofly info -url=mysql://localhost:3306/artypistdb -user=myuser -pass=mypass
+gofly info --url=mysql://localhost:3306/artypistdb --user=myuser --pass=mypass
 ```
 
 ## Taking over from Flyway
@@ -148,7 +152,7 @@ first run gofly:
 3. carries on from there.
 
 `flyway_schema_history` is only ever read, never written to and never dropped,
-so going back to Flyway stays possible. Pass `-importFromFlyway=false` to skip
+so going back to Flyway stays possible. Pass `--importFromFlyway=false` to skip
 the import.
 
 `info` and `validate` never import anything. On a database gofly has not taken
@@ -156,7 +160,7 @@ over yet they read `flyway_schema_history` directly and say so, so you can check
 compatibility before committing to the switch:
 
 ```sh
-gofly -url=... -locations=filesystem:./sql validate
+gofly --url=... --locations=filesystem:./sql validate
 ```
 
 Because the checksums are identical, a migration that was edited after Flyway
@@ -174,9 +178,10 @@ across, it does not paper over what is wrong with it.
 
 On MySQL a schema *is* a database, so putting the history in one of its own
 would mean `CREATE DATABASE` and privileges the migration user rarely has. Set
-`-goflySchema=gofly` if you want it anyway. SQLite has no schemas at all.
+`--goflySchema=gofly` if you want it anyway. SQLite has no schemas at all.
 
-Both names are configurable with `-goflySchema` and `-table`.
+Both names are configurable, with `--goflySchema` and `--goflyTable`. Flyway's
+`--table` sets the same thing as `--goflyTable`.
 
 ## Transactions
 
@@ -184,7 +189,7 @@ By default each migration runs in its own transaction, exactly like Flyway: a
 failure leaves the migrations before it applied and records the failed one, so
 the next run refuses to start until you `repair`.
 
-With `-group=true` the whole batch runs inside a single transaction: either
+With `--group=true` the whole batch runs inside a single transaction: either
 every pending migration is applied, or the database is left untouched and the
 history stays empty.
 

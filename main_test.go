@@ -115,6 +115,98 @@ func TestParseArgsFlags(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// TestParseArgsAcceptsDoubleDashOptions
+// -----------------------------------------------------------------------------
+func TestParseArgsAcceptsDoubleDashOptions(t *testing.T) {
+	withoutDefaultConfigFiles(t)
+
+	commands, config, err := parseArgs([]string{
+		"--url=jdbc:sqlite:/tmp/x.db",
+		"--locations=filesystem:./sql",
+		"--placeholders.env=production",
+		"--goflyTable=my_history",
+		"--q",
+		"migrate",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commands) != 1 || commands[0] != "migrate" {
+		t.Errorf("commands = %v, want [migrate]", commands)
+	}
+	if config.URL != "jdbc:sqlite:/tmp/x.db" {
+		t.Errorf("url = %q", config.URL)
+	}
+	if len(config.Locations) != 1 || config.Locations[0] != "filesystem:./sql" {
+		t.Errorf("locations = %v", config.Locations)
+	}
+	if config.Placeholders["env"] != "production" {
+		t.Errorf("placeholders = %v", config.Placeholders)
+	}
+	if config.Table != "my_history" {
+		t.Errorf("table = %q, want my_history", config.Table)
+	}
+	if !config.Quiet {
+		t.Error("--q should turn on quiet mode")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestParseArgsRejectsMalformedOptionPrefixes
+//
+// Only one or two dashes make an option, so that a typo is reported instead of
+// being read as something else entirely.
+// -----------------------------------------------------------------------------
+func TestParseArgsRejectsMalformedOptionPrefixes(t *testing.T) {
+	withoutDefaultConfigFiles(t)
+
+	for _, arg := range []string{"-", "--", "---url=x", "--=x"} {
+		if _, _, err := parseArgs([]string{arg}); err == nil {
+			t.Errorf("%q should have been rejected", arg)
+		}
+	}
+
+	if _, _, err := parseArgs([]string{"--url"}); err == nil {
+		t.Error("an option without a value should have been rejected")
+	}
+	if _, _, err := parseArgs([]string{"--notAnOption=1"}); err == nil {
+		t.Error("an unknown option should have been rejected")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestStandaloneCommand
+// -----------------------------------------------------------------------------
+func TestStandaloneCommand(t *testing.T) {
+	standalone := []struct {
+		args []string
+		want string
+	}{
+		{[]string{}, "help"},
+		{[]string{"help"}, "help"},
+		{[]string{"-h"}, "help"},
+		{[]string{"--help"}, "help"},
+		{[]string{"version"}, "version"},
+		{[]string{"-v"}, "version"},
+		{[]string{"--version"}, "version"},
+		{[]string{"--version", "--help"}, "help"},
+	}
+
+	for _, test := range standalone {
+		got, ok := standaloneCommand(test.args)
+		if !ok || got != test.want {
+			t.Errorf("standaloneCommand(%v) = %q, %v; want %q, true", test.args, got, ok, test.want)
+		}
+	}
+
+	for _, args := range [][]string{{"migrate"}, {"--url=x"}, {"---help"}, {"-"}, {"help", "migrate"}} {
+		if _, ok := standaloneCommand(args); ok {
+			t.Errorf("standaloneCommand(%v) should not have answered on its own", args)
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
 // TestRunMigratesEndToEnd
 // -----------------------------------------------------------------------------
 func TestRunMigratesEndToEnd(t *testing.T) {

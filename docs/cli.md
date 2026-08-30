@@ -5,8 +5,20 @@ gofly [options] command [command ...]
 ```
 
 Commands run in the order they are given, so `gofly ... info migrate info` is a
-perfectly reasonable thing to type. Anything that does not start with `-` is a
-command; everything else is an option, always in `-key=value` form.
+perfectly reasonable thing to type. Anything that does not start with a dash is
+a command; everything else is an option, always in `--key=value` form.
+
+The single dash Flyway uses is accepted for every option, so an existing Flyway
+command line runs under gofly unchanged:
+
+```sh
+gofly migrate --url=sqlite:./app.db --locations=filesystem:./sql
+gofly migrate  -url=sqlite:./app.db  -locations=filesystem:./sql   # Flyway style
+```
+
+Nothing else about the two forms differs, and they mix freely on one line. This
+page uses `--`; substitute `-` anywhere if that is what your scripts already
+have.
 
 The exit code is `0` when every command succeeded and `1` otherwise, which is
 what a deployment script wants.
@@ -18,7 +30,7 @@ what a deployment script wants.
 Applies every pending migration, in version order, then the repeatable ones in
 alphabetical order.
 
-Before doing anything it validates (unless `-validateOnMigrate=false`), so a
+Before doing anything it validates (unless `--validateOnMigrate=false`), so a
 migration that was edited after being applied stops the run. Pending migrations
 are of course not an error here, they are the point.
 
@@ -27,8 +39,8 @@ if a Flyway history is already there, imports it. See
 [compatibility.md](compatibility.md#taking-over-from-flyway).
 
 ```sh
-gofly -url=jdbc:postgresql://localhost:5432/mydb -user=admin -password=secret \
-      -locations=filesystem:./sql migrate
+gofly --url=jdbc:postgresql://localhost:5432/mydb --user=admin --password=secret \
+      --locations=filesystem:./sql migrate
 ```
 
 ### `undo`
@@ -36,7 +48,7 @@ gofly -url=jdbc:postgresql://localhost:5432/mydb -user=admin -password=secret \
 Undoes the most recently applied versioned migration, provided a `U`-prefixed
 undo script exists for it.
 
-With `-target` it keeps going, newest first, until it reaches a version below
+With `--target` it keeps going, newest first, until it reaches a version below
 the target or hits a migration with no undo script. Without one it stops after a
 single migration.
 
@@ -45,7 +57,7 @@ undone, and the migration becomes pending again so `migrate` re-applies it.
 
 ```sh
 gofly ... undo                # the last migration
-gofly ... -target=2 undo      # everything down to, but not including, version 2
+gofly ... --target=2 undo      # everything down to, but not including, version 2
 ```
 
 ### `info`
@@ -90,14 +102,14 @@ gofly ... validate
 
 ### `baseline`
 
-Marks an existing database as already migrated up to `-baselineVersion`, so that
+Marks an existing database as already migrated up to `--baselineVersion`, so that
 only migrations above it are ever applied. Use it when adopting gofly on a
 database whose schema was built by hand.
 
 Refuses to run if the history table already holds migrations.
 
 ```sh
-gofly ... -baselineVersion=10 -baselineDescription="Legacy schema" baseline
+gofly ... --baselineVersion=10 --baselineDescription="Legacy schema" baseline
 ```
 
 ### `repair`
@@ -134,10 +146,10 @@ environment; see [configuration.md](configuration.md).
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-url` | — | Database url, required; the `jdbc:` prefix is optional |
-| `-user` | — | Database user |
-| `-password` | — | Database password (`-pass` is accepted too) |
-| `-connectRetries` | `0` | Retries, one second apart, before giving up |
+| `--url` | — | Database url, required; the `jdbc:` prefix is optional |
+| `--user` | — | Database user |
+| `--password` | — | Database password (`--pass` is accepted too) |
+| `--connectRetries` | `0` | Retries, one second apart, before giving up |
 
 Url formats are listed in [configuration.md](configuration.md#database-urls).
 
@@ -145,51 +157,56 @@ Url formats are listed in [configuration.md](configuration.md#database-urls).
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-locations` | `filesystem:sql` | Comma separated `filesystem:<dir>` locations, scanned recursively |
-| `-sqlMigrationPrefix` | `V` | Prefix of versioned migrations |
-| `-undoSqlMigrationPrefix` | `U` | Prefix of undo migrations |
-| `-repeatableSqlMigrationPrefix` | `R` | Prefix of repeatable migrations |
-| `-sqlMigrationSeparator` | `__` | Between the version and the description |
-| `-sqlMigrationSuffixes` | `.sql` | Comma separated, matched case insensitively |
-| `-encoding` | `UTF-8` | Accepted for compatibility; gofly always reads UTF-8 |
+| `--locations` | `filesystem:sql` | Comma separated `filesystem:<dir>` locations, scanned recursively |
+| `--sqlMigrationPrefix` | `V` | Prefix of versioned migrations |
+| `--undoSqlMigrationPrefix` | `U` | Prefix of undo migrations |
+| `--repeatableSqlMigrationPrefix` | `R` | Prefix of repeatable migrations |
+| `--sqlMigrationSeparator` | `__` | Between the version and the description |
+| `--sqlMigrationSuffixes` | `.sql` | Comma separated, matched case insensitively |
+| `--encoding` | `UTF-8` | Accepted for compatibility; gofly always reads UTF-8 |
 
 ### Behaviour
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-target` | `latest` | Stop here. Also accepts `current`, `next`, `latest` |
-| `-group` | `false` | Run every pending migration in one transaction |
-| `-outOfOrder` | `false` | Apply migrations older than the current version |
-| `-validateOnMigrate` | `true` | Validate before migrating |
-| `-baselineVersion` | `1` | Version the `baseline` command records |
-| `-baselineDescription` | `<< Flyway Baseline >>` | Description it records |
-| `-baselineOnMigrate` | `false` | Baseline automatically on the first migrate |
-| `-ignoreMissingMigrations` | `false` | Tolerate applied migrations whose file is gone |
-| `-ignoreFutureMigrations` | `true` | Tolerate history rows newer than anything local |
-| `-installedBy` | the connecting user | What to record in `installed_by` |
-| `-skipExecutingMigrations` | `false` | Record migrations as applied without running them |
-| `-mixed` | `false` | Accepted for compatibility, has no effect |
-| `-cleanDisabled` | `true` | `clean` is not implemented either way |
+| `--target` | `latest` | Stop here. Also accepts `current`, `next`, `latest` |
+| `--group` | `false` | Run every pending migration in one transaction |
+| `--outOfOrder` | `false` | Apply migrations older than the current version |
+| `--validateOnMigrate` | `true` | Validate before migrating |
+| `--baselineVersion` | `1` | Version the `baseline` command records |
+| `--baselineDescription` | `<< Flyway Baseline >>` | Description it records |
+| `--baselineOnMigrate` | `false` | Baseline automatically on the first migrate |
+| `--ignoreMissingMigrations` | `false` | Tolerate applied migrations whose file is gone |
+| `--ignoreFutureMigrations` | `true` | Tolerate history rows newer than anything local |
+| `--installedBy` | the connecting user | What to record in `installed_by` |
+| `--skipExecutingMigrations` | `false` | Record migrations as applied without running them |
+| `--mixed` | `false` | Accepted for compatibility, has no effect |
+| `--cleanDisabled` | `true` | `clean` is not implemented either way |
 
 ### Schema history
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-table` | `gofly_schema_history` | Name of gofly's history table |
-| `-goflySchema` | `gofly` on PostgreSQL and SQL Server, none elsewhere | Schema holding it |
-| `-defaultSchema` | the connection's own | Schema the migrations run against |
-| `-schemas` | — | Comma separated; the first is the default schema |
-| `-flywayTable` | `flyway_schema_history` | The table to import from and validate against |
-| `-importFromFlyway` | `true` | Import an existing Flyway history on the first run |
+| `--goflyTable` | `gofly_schema_history` | Name of gofly's history table |
+| `--goflySchema` | `gofly` on PostgreSQL and SQL Server, none elsewhere | Schema holding it |
+| `--defaultSchema` | the connection's own | Schema the migrations run against |
+| `--schemas` | — | Comma separated; the first is the default schema |
+| `--flywayTable` | `flyway_schema_history` | The table to import from and validate against |
+| `--importFromFlyway` | `true` | Import an existing Flyway history on the first run |
+
+`--table` is Flyway's name for its own history table and sets `--goflyTable`;
+the two are the same option. The `gofly`/`flyway` pairs sit next to each other
+deliberately: `--goflyTable` and `--goflySchema` say where gofly writes,
+`--flywayTable` says where it reads a pre-existing Flyway history from.
 
 ### Placeholders
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-placeholders.NAME` | — | Sets the placeholder `NAME` |
-| `-placeholderPrefix` | `${` | |
-| `-placeholderSuffix` | `}` | |
-| `-placeholderReplacement` | `true` | Turn substitution off entirely |
+| `--placeholders.NAME` | — | Sets the placeholder `NAME` |
+| `--placeholderPrefix` | `${` | |
+| `--placeholderSuffix` | `}` | |
+| `--placeholderReplacement` | `true` | Turn substitution off entirely |
 
 Placeholders are replaced *after* the checksum is computed, so the checksum
 depends on the file as written and not on the values passed in. That is what
@@ -199,14 +216,17 @@ lets the same migration be deployed to several environments.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-configFiles` | discovered, see [configuration.md](configuration.md) | Comma separated properties files |
-| `-q` | off | Quiet |
-| `-X` | off | Verbose |
+| `--configFiles` | discovered, see [configuration.md](configuration.md) | Comma separated properties files |
+| `--quiet` | off | Quiet, `--q` for short |
+| `--verbose` | off | Verbose, `--X` for short |
+
+These three take no value. `--q` and `--X` are Flyway's spellings and keep
+working.
 
 ## Migrating from the Flyway command line
 
-The options above are Flyway's, so an existing invocation usually needs no
-editing at all:
+The option names above are Flyway's, and so is the single dash spelling, so an
+existing invocation usually needs no editing at all — only the binary changes:
 
 ```sh
 # before
@@ -216,10 +236,14 @@ flyway -url=jdbc:postgresql://db:5432/app -user=admin -connectRetries=10 \
 # after
 gofly  -url=jdbc:postgresql://db:5432/app -user=admin -connectRetries=10 \
        -locations=filesystem:/db/schema migrate
+
+# or, once you feel like tidying it up
+gofly  --url=jdbc:postgresql://db:5432/app --user=admin --connectRetries=10 \
+       --locations=filesystem:/db/schema migrate
 ```
 
 Options gofly does not implement are listed in
 [compatibility.md](compatibility.md#deliberately-left-out). Ones that only ever
-mattered to the Java edition (`-driver`, `-jarDirs`, `-resolvers`, `-callbacks`,
-`-dryRunOutput`, …) are accepted and ignored, so a long-standing command line
-keeps working.
+mattered to the Java edition (`--driver`, `--jarDirs`, `--resolvers`,
+`--callbacks`, `--dryRunOutput`, …) are accepted and ignored, so a long-standing
+command line keeps working.

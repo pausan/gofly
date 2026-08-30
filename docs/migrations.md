@@ -99,7 +99,7 @@ environment, whatever the placeholder values are.
 Once a migration has been applied, its checksum is recorded. Change the file
 afterwards and gofly refuses to do anything until you either put it back or run
 `repair`. That is the whole safety mechanism, and it is not optional short of
-`-validateOnMigrate=false`.
+`--validateOnMigrate=false`.
 
 ## Placeholders
 
@@ -108,18 +108,18 @@ CREATE TABLE ${schema_name}.users (id INT);
 ```
 
 ```sh
-gofly ... -placeholders.schema_name=app migrate
+gofly ... --placeholders.schema_name=app migrate
 ```
 
 Longer placeholder names are substituted first, so `${db}` never eats the start
-of `${db_name}`. The delimiters are configurable with `-placeholderPrefix` and
-`-placeholderSuffix`.
+of `${db_name}`. The delimiters are configurable with `--placeholderPrefix` and
+`--placeholderSuffix`.
 
 ## Transactions
 
 Each migration runs in its own transaction by default, exactly like Flyway.
 
-With `-group=true` the whole pending batch runs in a single transaction: either
+With `--group=true` the whole pending batch runs in a single transaction: either
 every migration is applied or the database is untouched and the history stays
 empty.
 

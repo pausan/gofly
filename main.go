@@ -14,7 +14,7 @@ import (
 )
 
 // Version of gofly itself
-const Version = "0.1.1"
+const Version = "0.1.2"
 
 // -----------------------------------------------------------------------------
 // main
@@ -101,7 +101,15 @@ func standaloneCommand(args []string) (string, bool) {
 	command := ""
 
 	for _, arg := range args {
-		switch strings.ToLower(strings.TrimLeft(arg, "-")) {
+		name, isOption := trimOptionPrefix(arg)
+		if !isOption {
+			if strings.HasPrefix(arg, "-") {
+				return "", false
+			}
+			name = arg
+		}
+
+		switch strings.ToLower(name) {
 		case "help", "h", "?":
 			command = "help"
 		case "version", "v":
@@ -193,8 +201,9 @@ func runCommand(gofly *lib.Gofly, command string, stdout io.Writer) error {
 // parseArgs
 //
 // Reads the command line the way the Flyway command line does: commands come
-// first, options are -key=value, and -configFiles is honoured before anything
-// else so that the command line always wins over the files.
+// first, options are --key=value, and the single dash Flyway uses is accepted
+// throughout. --configFiles is honoured before anything else so that the
+// command line always wins over the files.
 // -----------------------------------------------------------------------------
 func parseArgs(args []string) ([]string, *lib.Config, error) {
 	config := lib.NewConfig()
@@ -209,7 +218,12 @@ func parseArgs(args []string) ([]string, *lib.Config, error) {
 			continue
 		}
 
-		key, value, found := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		name, isOption := trimOptionPrefix(arg)
+		if !isOption {
+			return nil, nil, fmt.Errorf("expected -key=value or --key=value, got %q", arg)
+		}
+
+		key, value, found := strings.Cut(name, "=")
 		if !found {
 			switch strings.ToLower(key) {
 			case "q", "quiet":
@@ -221,7 +235,7 @@ func parseArgs(args []string) ([]string, *lib.Config, error) {
 			case "v", "version":
 				commands = append(commands, "version")
 			default:
-				return nil, nil, fmt.Errorf("expected -%s=<value>", key)
+				return nil, nil, fmt.Errorf("expected %s=<value>", arg)
 			}
 			continue
 		}
@@ -258,6 +272,28 @@ func parseArgs(args []string) ([]string, *lib.Config, error) {
 }
 
 // -----------------------------------------------------------------------------
+// trimOptionPrefix
+//
+// Strips the leading dashes of an option and says whether the argument looked
+// like one at all. Both the Flyway style -key=value and the usual --key=value
+// are accepted; a lone dash, or a third one, is neither.
+// -----------------------------------------------------------------------------
+func trimOptionPrefix(arg string) (string, bool) {
+	name, found := strings.CutPrefix(arg, "--")
+	if !found {
+		if name, found = strings.CutPrefix(arg, "-"); !found {
+			return "", false
+		}
+	}
+
+	if name == "" || strings.HasPrefix(name, "-") {
+		return "", false
+	}
+
+	return name, true
+}
+
+// -----------------------------------------------------------------------------
 // splitCommaList
 // -----------------------------------------------------------------------------
 func splitCommaList(value string) []string {
@@ -281,6 +317,12 @@ func printUsage(out io.Writer) {
 Usage
   gofly [options] command [command ...]
 
+  Options are --key=value. The single dash Flyway uses works too, so an existing
+  Flyway command line runs unchanged:
+
+    gofly migrate --url=sqlite:./app.db --locations=filesystem:./sql
+    gofly migrate  -url=sqlite:./app.db  -locations=filesystem:./sql   (Flyway style)
+
 Commands
   migrate     Apply every pending migration
   undo        Undo the most recently applied versioned migration
@@ -291,10 +333,10 @@ Commands
   clean       Not implemented on purpose, see the README
 
 Connection
-  -url=...                 Database url, see the examples below
-  -user=...                Database user
-  -password=...            Database password (-pass also works)
-  -connectRetries=0        Retries, one second apart, before giving up
+  --url=...                 Database url, see the examples below
+  --user=...                Database user
+  --password=...            Database password (--pass also works)
+  --connectRetries=0        Retries, one second apart, before giving up
 
 Database urls
   The jdbc: prefix Flyway needs is optional, mysql://... and jdbc:mysql://...
@@ -307,47 +349,48 @@ Database urls
   sqlite:/path/to.db                       (file: too)
 
 Examples
-  gofly info -url=mysql://localhost:3306/mydb -user=root -pass=secret
-  gofly migrate -url=postgresql://db:5432/mydb -user=admin -pass=secret \
-        -locations=filesystem:./db/schema
-  gofly migrate -configFiles=flyway.conf
-  gofly validate info -url=sqlite:./local.db
+  gofly info --url=mysql://localhost:3306/mydb --user=root --pass=secret
+  gofly migrate --url=postgresql://db:5432/mydb --user=admin --pass=secret \
+        --locations=filesystem:./db/schema
+  gofly migrate --configFiles=flyway.conf
+  gofly validate info --url=sqlite:./local.db
 
 Migrations
-  -locations=...           Comma separated filesystem:<dir> locations
-  -sqlMigrationPrefix=V    Prefix of the versioned migrations
-  -undoSqlMigrationPrefix=U
-  -repeatableSqlMigrationPrefix=R
-  -sqlMigrationSeparator=__
-  -sqlMigrationSuffixes=.sql
-  -encoding=UTF-8
+  --locations=...           Comma separated filesystem:<dir> locations
+  --sqlMigrationPrefix=V    Prefix of the versioned migrations
+  --undoSqlMigrationPrefix=U
+  --repeatableSqlMigrationPrefix=R
+  --sqlMigrationSeparator=__
+  --sqlMigrationSuffixes=.sql
+  --encoding=UTF-8
 
 Behaviour
-  -target=...              Stop at this version (or latest, current, next)
-  -group=false             Run every pending migration in one transaction
-  -outOfOrder=false        Apply migrations older than the current version
-  -validateOnMigrate=true  Validate before migrating
-  -baselineVersion=1
-  -baselineDescription="<< Flyway Baseline >>"
-  -baselineOnMigrate=false
-  -ignoreMissingMigrations=false
-  -ignoreFutureMigrations=true
-  -installedBy=...
-  -placeholders.name=value
+  --target=...              Stop at this version (or latest, current, next)
+  --group=false             Run every pending migration in one transaction
+  --outOfOrder=false        Apply migrations older than the current version
+  --validateOnMigrate=true  Validate before migrating
+  --baselineVersion=1
+  --baselineDescription="<< Flyway Baseline >>"
+  --baselineOnMigrate=false
+  --ignoreMissingMigrations=false
+  --ignoreFutureMigrations=true
+  --installedBy=...
+  --placeholders.name=value
 
 Schema history
-  -table=gofly_schema_history   Name of the gofly history table
-  -goflySchema=gofly            Schema holding it (PostgreSQL and SQL Server)
-  -defaultSchema=...            Schema the migrations run against
-  -flywayTable=flyway_schema_history
-  -importFromFlyway=true        Import an existing Flyway history on first run
+  --goflyTable=gofly_schema_history  Name of the gofly history table (--table too)
+  --goflySchema=gofly                Schema holding it (PostgreSQL and SQL Server)
+  --defaultSchema=...                Schema the migrations run against
+  --flywayTable=flyway_schema_history
+  --importFromFlyway=true            Import an existing Flyway history on first run
 
 Other
-  -configFiles=a.conf,b.conf    Flyway style properties files
-  -q                            Quiet
-  -X                            Verbose
+  --configFiles=a.conf,b.conf    Flyway style properties files
+  --quiet                        Quiet (-q for short)
+  --verbose                      Verbose (-X for short)
 
-Every option can also be given as flyway.<name> in a config file, or as
-FLYWAY_<NAME> / GOFLY_<NAME> in the environment.
+Every option can also be given as gofly.<name> in a config file, or as
+GOFLY_<NAME> in the environment; the flyway.<name> and FLYWAY_<NAME> spellings
+still work and warn.
 `, Version)
 }

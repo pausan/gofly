@@ -148,6 +148,41 @@ func TestConfigRejectsUnknownProperties(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// TestConfigGoflyTableIsAnAliasForTable
+// -----------------------------------------------------------------------------
+func TestConfigGoflyTableIsAnAliasForTable(t *testing.T) {
+	config := NewConfig()
+
+	if err := config.Set("goflyTable", "my_history"); err != nil {
+		t.Fatalf("goflyTable was rejected: %v", err)
+	}
+	if config.Table != "my_history" {
+		t.Errorf("table = %q, want my_history", config.Table)
+	}
+
+	if err := config.Set("table", "other_history"); err != nil {
+		t.Fatalf("table was rejected: %v", err)
+	}
+	if config.Table != "other_history" {
+		t.Errorf("table = %q, want other_history", config.Table)
+	}
+
+	// the alias lives in every namespace the plain name does
+	config = NewConfig()
+	if err := config.Set("gofly.goflyTable", "namespaced"); err != nil {
+		t.Fatalf("gofly.goflyTable was rejected: %v", err)
+	}
+	if config.Table != "namespaced" {
+		t.Errorf("table = %q, want namespaced", config.Table)
+	}
+
+	// and it does not disturb the flyway table it sits next to
+	if config.FlywayTable != FlywayTable {
+		t.Errorf("flywayTable = %q, want %q", config.FlywayTable, FlywayTable)
+	}
+}
+
+// -----------------------------------------------------------------------------
 // TestConfigParsesLists
 // -----------------------------------------------------------------------------
 func TestConfigParsesLists(t *testing.T) {

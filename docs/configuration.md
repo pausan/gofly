@@ -3,13 +3,17 @@
 Every setting can be given in four places. Each overrides the one before it:
 
 1. **built-in defaults** — Flyway's defaults
-2. **config files** — `-configFiles=…`, or the ones gofly discovers
+2. **config files** — `--configFiles=…`, or the ones gofly discovers
 3. **environment variables** — `GOFLY_*`, or the deprecated `FLYWAY_*`
-4. **the command line** — `-url=…`
+4. **the command line** — `--url=…`, or Flyway's `-url=…`
 
 So a `gofly.conf` checked into the repository can hold the locations and the
 naming conventions, while CI supplies the password through the environment and a
 one-off run overrides the target on the command line.
+
+Command line options are written `--key=value`; Flyway's single dash works
+everywhere too, so `-url=…` and `--url=…` are the same option. See
+[cli.md](cli.md).
 
 ## Config files
 
@@ -37,7 +41,7 @@ silently do nothing.
 
 ### Which files are read
 
-`-configFiles=a.conf,b.conf` reads exactly those, in order.
+`--configFiles=a.conf,b.conf` reads exactly those, in order.
 
 Without it, gofly looks for `gofly.conf` in three places and reads all of them,
 in this order:
@@ -135,11 +139,11 @@ Query parameters are passed through to the driver, so
 `database`.
 
 The port may be left out and defaults to 5432, 3306 or 1433. Credentials in the
-url are used when `-user` and `-password` are not given. `-pass` is accepted as a
-shorthand for `-password`, so a run needs no config file at all:
+url are used when `--user` and `--password` are not given. `--pass` is accepted
+as a shorthand for `--password`, so a run needs no config file at all:
 
 ```bash
-gofly info -url=mysql://localhost:3306/artypistdb -user=myuser -pass=mypass
+gofly info --url=mysql://localhost:3306/artypistdb --user=myuser --pass=mypass
 ```
 
 ## Where the schema history lives
@@ -153,9 +157,10 @@ gofly info -url=mysql://localhost:3306/artypistdb -user=myuser -pass=mypass
 
 On MySQL a schema *is* a database, so giving the history one of its own would
 mean `CREATE DATABASE` and privileges the migration user rarely has. Set
-`-goflySchema=gofly` if you want it anyway. SQLite has no schemas at all.
+`--goflySchema=gofly` if you want it anyway. SQLite has no schemas at all.
 
-Both names are configurable with `-goflySchema` and `-table`.
+Both names are configurable, with `--goflySchema` and `--goflyTable`. Flyway's
+`--table` sets the same thing as `--goflyTable`.
 
 ### A note on PostgreSQL and search_path
 
@@ -194,5 +199,5 @@ gofly migrate
 and a developer overriding the target to reproduce a bug:
 
 ```sh
-gofly -target=14 migrate
+gofly --target=14 migrate
 ```

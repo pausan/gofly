@@ -217,7 +217,9 @@ func (c *Config) SetFrom(key string, value string, origin Origin) error {
 		c.DefaultSchema = value
 	case "goflyschema":
 		c.GoflySchema = value
-	case "table":
+	// table is Flyway's name for it; goflyTable reads better next to
+	// goflySchema and flywayTable, so both spellings set the same thing
+	case "table", "goflytable":
 		c.Table = value
 	case "flywaytable":
 		c.FlywayTable = value

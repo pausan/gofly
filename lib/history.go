@@ -269,36 +269,15 @@ func (h *SchemaHistory) ImportFromFlyway(flywaySchema string, flywayTable string
 
 	// gofly never touches the Flyway table, it only reads it, so a rollback of
 	// the migration that follows leaves the original history untouched
-	query := h.rewriteQuotes(`SELECT ` + h.columnList() + ` FROM ` + source + ` ORDER BY "installed_rank"`)
-
-	rows, err := db.Query(query)
+	// Copy inside the database so timestamps retain their original value and
+	// precision instead of being replaced by the destination's DEFAULT now().
+	query := h.rewriteQuotes("INSERT INTO " + h.QualifiedName() + " (" + h.columnList() + ") SELECT " + h.columnList() + " FROM " + source)
+	result, err := db.Exec(query)
 	if err != nil {
-		return 0, fmt.Errorf("cannot read the flyway schema history %s: %w", source, err)
+		return 0, fmt.Errorf("cannot import the flyway schema history %s: %w", source, err)
 	}
-
-	migrations, err := scanAppliedMigrations(rows)
-	rows.Close()
-	if err != nil {
-		return 0, err
-	}
-
-	transaction, err := db.Begin()
-	if err != nil {
-		return 0, err
-	}
-
-	for _, migration := range migrations {
-		if err := h.Insert(transaction, migration); err != nil {
-			transaction.Rollback()
-			return 0, fmt.Errorf("cannot import row %d of %s: %w", migration.InstalledRank, source, err)
-		}
-	}
-
-	if err := transaction.Commit(); err != nil {
-		return 0, err
-	}
-
-	return len(migrations), nil
+	count, err := result.RowsAffected()
+	return int(count), err
 }
 
 // -----------------------------------------------------------------------------

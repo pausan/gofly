@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // integrationTarget is one database to run the suite against
@@ -358,6 +359,11 @@ func TestIntegrationImportsAFlywayHistory(t *testing.T) {
 				t.Fatalf("cannot create gofly_a: %v", err)
 			}
 
+			originalTime := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+			if _, err := db.Exec("UPDATE "+source.QualifiedName()+" SET installed_on = "+dialect.Placeholder(1), originalTime); err != nil {
+				t.Fatal(err)
+			}
+
 			result, err := gofly.Migrate()
 			if err != nil {
 				t.Fatalf("migrate failed: %v", err)
@@ -372,6 +378,9 @@ func TestIntegrationImportsAFlywayHistory(t *testing.T) {
 			}
 			if len(applied) != 2 {
 				t.Fatalf("the history holds %d rows, want 2", len(applied))
+			}
+			if !applied[0].InstalledOn.Equal(originalTime) {
+				t.Errorf("import changed installed_on: got %v, want %v", applied[0].InstalledOn, originalTime)
 			}
 			if applied[0].InstalledBy != "flyway" || applied[0].ExecutionTime != 42 {
 				t.Errorf("the imported row lost data: %+v", applied[0])

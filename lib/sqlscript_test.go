@@ -235,3 +235,12 @@ func TestSplitPostgresEscapeStringsWithoutChangingOrdinaryStrings(t *testing.T) 
 	}
 	assertStatements(t, `SELECT '\'; SELECT 2;`, DialectPostgres, []string{`SELECT '\'`, "SELECT 2"})
 }
+
+// -----------------------------------------------------------------------------
+// TestSplitKeepsNestedPostgresCommentsIntact
+// -----------------------------------------------------------------------------
+func TestSplitKeepsNestedPostgresCommentsIntact(t *testing.T) {
+	statement := "/* outer /* inner */ ; SELECT 'ignored'; */ SELECT 42"
+	assertStatements(t, statement+"; SELECT 2;", DialectPostgres, []string{statement, "SELECT 2"})
+	assertStatements(t, "/* outer /* inner */ ; ignored */", DialectPostgres, []string{})
+}

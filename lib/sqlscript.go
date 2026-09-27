@@ -80,20 +80,11 @@ func SplitStatements(sql string, dialect string) []Statement {
 
 		// ---- block comment ------------------------------------------------
 		if char == '/' && index+1 < len(runes) && runes[index+1] == '*' {
-			current.WriteString("/*")
-			index += 2
-			for index < len(runes) {
-				if runes[index] == '\n' {
-					line++
-				}
-				if runes[index] == '*' && index+1 < len(runes) && runes[index+1] == '/' {
-					current.WriteString("*/")
-					index += 2
-					break
-				}
-				current.WriteRune(runes[index])
-				index++
-			}
+			end := readBlockComment(runes, index, flavour.dollarQuoted || flavour.batchSeparator != "")
+			text := string(runes[index:end])
+			current.WriteString(text)
+			line += strings.Count(text, "\n")
+			index = end
 			continue
 		}
 
@@ -403,14 +394,7 @@ func isCommentOnly(text string) bool {
 		}
 
 		if runes[index] == '/' && index+1 < len(runes) && runes[index+1] == '*' {
-			index += 2
-			for index < len(runes) {
-				if runes[index] == '*' && index+1 < len(runes) && runes[index+1] == '/' {
-					index += 2
-					break
-				}
-				index++
-			}
+			index = readBlockComment(runes, index, true)
 			continue
 		}
 
@@ -436,4 +420,30 @@ func postgresEscapePrefix(runes []rune, quote int) bool {
 	}
 	previous := runes[quote-2]
 	return !unicode.IsLetter(previous) && !unicode.IsDigit(previous) && previous != '_' && previous != '$'
+}
+
+// -----------------------------------------------------------------------------
+// readBlockComment
+// -----------------------------------------------------------------------------
+func readBlockComment(runes []rune, start int, nested bool) int {
+	depth := 1
+	for index := start + 2; index < len(runes); {
+		if index+1 < len(runes) {
+			if nested && runes[index] == '/' && runes[index+1] == '*' {
+				depth++
+				index += 2
+				continue
+			}
+			if runes[index] == '*' && runes[index+1] == '/' {
+				depth--
+				index += 2
+				if depth == 0 {
+					return index
+				}
+				continue
+			}
+		}
+		index++
+	}
+	return len(runes)
 }

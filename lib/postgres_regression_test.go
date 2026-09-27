@@ -226,3 +226,20 @@ func TestPostgresMigratesEscapedStringWithSemicolon(t *testing.T) {
 		t.Errorf("unexpected data %q", text)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestPostgresMigratesNestedComments
+// -----------------------------------------------------------------------------
+func TestPostgresMigratesNestedComments(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int); /* outer /* inner */ ; SELECT 'ignored'; */ INSERT INTO events VALUES(42);"})
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	var value int
+	if err := g.Connection.DB().QueryRow("SELECT v FROM events").Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != 42 {
+		t.Errorf("got %d", value)
+	}
+}

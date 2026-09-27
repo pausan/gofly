@@ -81,8 +81,9 @@ called `gofly`. If the login is also called `gofly`, migrations would quietly
 land in the history schema.
 
 `postgresDialect.DefaultSchema` therefore walks `current_schemas(false)` and
-skips the history schema, and `NewWithConnection` pins the session to the
-resolved schema before anything runs. There is a regression test for this in
+skips the history schema, and `NewWithConnection` pins a physical PostgreSQL connection and its search path
+before anything runs. Migration SQL, history writes, COPY and advisory locks
+must use that session; the public DB() pool is for independent queries. There is a regression test for this in
 `lib/integration_test.go`; it cannot be reproduced on SQLite.
 
 ### 5. Failures are only recorded where the DDL could not be rolled back
@@ -231,7 +232,7 @@ func FunctionName() {
 
 See [docs/compatibility.md](docs/compatibility.md#deliberately-left-out) for the
 full list and the reasoning. In short: Java and script migrations, callbacks,
-cherry-pick, dry runs, `ignoreMigrationPatterns`, locking, `clean`, and every
+cherry-pick, dry runs, `ignoreMigrationPatterns`, non-PostgreSQL locking, `clean`, and every
 database beyond the four supported.
 
 If you add one of these, it should be because someone asked for it, not because

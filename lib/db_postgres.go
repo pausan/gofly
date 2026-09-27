@@ -36,7 +36,7 @@ func (d *postgresDialect) Placeholder(index int) string {
 // -----------------------------------------------------------------------------
 // DefaultSchema
 // -----------------------------------------------------------------------------
-func (d *postgresDialect) DefaultSchema(db *sql.DB, excluding string) (string, error) {
+func (d *postgresDialect) DefaultSchema(db Database, excluding string) (string, error) {
 	// current_schema() alone is a trap here: the stock search_path is
 	// "$user", public, so the moment a schema named after the connecting user
 	// exists, current_schema() switches to it. gofly creates exactly such a
@@ -75,7 +75,7 @@ func (d *postgresDialect) SupportsSchemas() bool {
 // -----------------------------------------------------------------------------
 // SchemaExists
 // -----------------------------------------------------------------------------
-func (d *postgresDialect) SchemaExists(db *sql.DB, schema string) (bool, error) {
+func (d *postgresDialect) SchemaExists(db Database, schema string) (bool, error) {
 	var found int
 	err := db.QueryRow(
 		`SELECT 1 FROM information_schema.schemata WHERE schema_name = $1`, schema,
@@ -94,7 +94,7 @@ func (d *postgresDialect) CreateSchemaSQL(schema string) []string {
 // -----------------------------------------------------------------------------
 // TableExists
 // -----------------------------------------------------------------------------
-func (d *postgresDialect) TableExists(db *sql.DB, schema string, table string) (bool, error) {
+func (d *postgresDialect) TableExists(db Database, schema string, table string) (bool, error) {
 	if schema == "" {
 		var found int
 		err := db.QueryRow(
@@ -162,7 +162,7 @@ func (d *postgresDialect) BooleanLiteral(value bool) string {
 // -----------------------------------------------------------------------------
 // SetSessionSchema
 // -----------------------------------------------------------------------------
-func (d *postgresDialect) SetSessionSchema(db *sql.DB, schema string) error {
+func (d *postgresDialect) SetSessionSchema(db Database, schema string) error {
 	if schema == "" {
 		return nil
 	}

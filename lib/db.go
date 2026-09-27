@@ -37,7 +37,7 @@ type Dialect interface {
 	// DefaultSchema returns the schema the connection writes to by default,
 	// never returning excluding, which is the schema gofly keeps its own
 	// history in
-	DefaultSchema(db *sql.DB, excluding string) (string, error)
+	DefaultSchema(db Database, excluding string) (string, error)
 
 	// DefaultHistorySchema is where gofly keeps its own history table. An empty
 	// string means "the default schema of the connection".
@@ -47,13 +47,13 @@ type Dialect interface {
 	SupportsSchemas() bool
 
 	// SchemaExists reports whether a schema is already there
-	SchemaExists(db *sql.DB, schema string) (bool, error)
+	SchemaExists(db Database, schema string) (bool, error)
 
 	// CreateSchemaSQL returns the statements creating a schema
 	CreateSchemaSQL(schema string) []string
 
 	// TableExists reports whether a table is already there
-	TableExists(db *sql.DB, schema string, table string) (bool, error)
+	TableExists(db Database, schema string, table string) (bool, error)
 
 	// CreateHistoryTableSQL returns the statements creating the history table,
 	// byte for byte compatible with the one Flyway creates
@@ -66,12 +66,13 @@ type Dialect interface {
 	BooleanLiteral(value bool) string
 
 	// SetSessionSchema points the session at the given schema, when possible
-	SetSessionSchema(db *sql.DB, schema string) error
+	SetSessionSchema(db Database, schema string) error
 }
 
 // Connection bundles an open database handle with its dialect
 type Connection struct {
 	db      *sql.DB
+	session *sql.Conn
 	dialect Dialect
 	url     string
 }
@@ -151,7 +152,12 @@ func (c *Connection) Close() error {
 		return nil
 	}
 
-	err := c.db.Close()
+	var sessionErr error
+	if c.session != nil {
+		sessionErr = c.session.Close()
+		c.session = nil
+	}
+	err := errors.Join(sessionErr, c.db.Close())
 	c.db = nil
 
 	return err

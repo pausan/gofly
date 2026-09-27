@@ -15,26 +15,35 @@ var postgresCopyFrom func(*sql.Conn, string, string) error
 
 type migrationTransaction struct {
 	*sql.Tx
-	conn *sql.Conn
+	conn  *sql.Conn
+	owned bool
 }
 
 // -----------------------------------------------------------------------------
 // beginMigration
 // -----------------------------------------------------------------------------
 func (c *Connection) beginMigration(transactional ...bool) (*migrationTransaction, error) {
-	conn, err := c.DB().Conn(context.Background())
-	if err != nil {
-		return nil, err
+	conn := c.session
+	owned := conn == nil
+	var err error
+	if owned {
+		conn, err = c.DB().Conn(context.Background())
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	if len(transactional) > 0 && !transactional[0] {
-		return &migrationTransaction{conn: conn}, nil
+		return &migrationTransaction{conn: conn, owned: owned}, nil
 	}
 	tx, err := conn.BeginTx(context.Background(), nil)
 	if err != nil {
-		conn.Close()
+		if owned {
+			conn.Close()
+		}
 		return nil, err
 	}
-	return &migrationTransaction{Tx: tx, conn: conn}, nil
+	return &migrationTransaction{Tx: tx, conn: conn, owned: owned}, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -42,9 +51,9 @@ func (c *Connection) beginMigration(transactional ...bool) (*migrationTransactio
 // -----------------------------------------------------------------------------
 func (m *migrationTransaction) Commit() error {
 	if m.Tx == nil {
-		return m.conn.Close()
+		return m.release()
 	}
-	return errors.Join(m.Tx.Commit(), m.conn.Close())
+	return errors.Join(m.Tx.Commit(), m.release())
 }
 
 // -----------------------------------------------------------------------------
@@ -52,9 +61,9 @@ func (m *migrationTransaction) Commit() error {
 // -----------------------------------------------------------------------------
 func (m *migrationTransaction) Rollback() error {
 	if m.Tx == nil {
-		return m.conn.Close()
+		return m.release()
 	}
-	return errors.Join(m.Tx.Rollback(), m.conn.Close())
+	return errors.Join(m.Tx.Rollback(), m.release())
 }
 
 // -----------------------------------------------------------------------------
@@ -75,4 +84,14 @@ func (m *migrationTransaction) Exec(query string, args ...any) (sql.Result, erro
 		return m.Tx.Exec(query, args...)
 	}
 	return m.conn.ExecContext(context.Background(), query, args...)
+}
+
+// -----------------------------------------------------------------------------
+// release
+// -----------------------------------------------------------------------------
+func (m *migrationTransaction) release() error {
+	if m.owned {
+		return m.conn.Close()
+	}
+	return nil
 }

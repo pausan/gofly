@@ -204,7 +204,7 @@ pretending otherwise.
 
 The point is a small tool that does the essentials well, so a number of Flyway
 features are out of scope: Java and script migrations, callbacks, cherry-pick,
-dry runs, `ignoreMigrationPatterns`, locking, and every database beyond the four
+dry runs, `ignoreMigrationPatterns`, locking outside PostgreSQL, and every database beyond the four
 listed above.
 
 `clean` is not implemented. Wiping a schema is not a migration, and each of

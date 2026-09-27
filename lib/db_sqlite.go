@@ -35,7 +35,7 @@ func (d *sqliteDialect) Placeholder(index int) string {
 // -----------------------------------------------------------------------------
 // DefaultSchema
 // -----------------------------------------------------------------------------
-func (d *sqliteDialect) DefaultSchema(db *sql.DB, excluding string) (string, error) {
+func (d *sqliteDialect) DefaultSchema(db Database, excluding string) (string, error) {
 	return "main", nil
 }
 
@@ -59,7 +59,7 @@ func (d *sqliteDialect) SupportsSchemas() bool {
 // -----------------------------------------------------------------------------
 // SchemaExists
 // -----------------------------------------------------------------------------
-func (d *sqliteDialect) SchemaExists(db *sql.DB, schema string) (bool, error) {
+func (d *sqliteDialect) SchemaExists(db Database, schema string) (bool, error) {
 	return schema == "" || schema == "main", nil
 }
 
@@ -73,7 +73,7 @@ func (d *sqliteDialect) CreateSchemaSQL(schema string) []string {
 // -----------------------------------------------------------------------------
 // TableExists
 // -----------------------------------------------------------------------------
-func (d *sqliteDialect) TableExists(db *sql.DB, schema string, table string) (bool, error) {
+func (d *sqliteDialect) TableExists(db Database, schema string, table string) (bool, error) {
 	var found int
 	err := db.QueryRow(
 		`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
@@ -127,7 +127,7 @@ func (d *sqliteDialect) BooleanLiteral(value bool) string {
 // -----------------------------------------------------------------------------
 // SetSessionSchema
 // -----------------------------------------------------------------------------
-func (d *sqliteDialect) SetSessionSchema(db *sql.DB, schema string) error {
+func (d *sqliteDialect) SetSessionSchema(db Database, schema string) error {
 	return nil
 }
 

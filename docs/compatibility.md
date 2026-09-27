@@ -168,9 +168,9 @@ someone needs it.
 
 ### Other
 
-- **Locking** — Flyway takes a lock on the history table so that concurrent
-  deployments queue up. gofly does not, so do not run two migrations against the
-  same database at the same time.
+- **Locking outside PostgreSQL** — PostgreSQL mutating commands take session
+  advisory locks compatible with Flyway, before reading or creating history.
+  Other engines still require deployment-level serialization.
 - **Baseline migrations** (`B1__…sql`, Teams) — not supported.
 - **Custom `MigrationResolver` / `Callback` implementations** — Java interfaces,
   so there is nothing to plug in.

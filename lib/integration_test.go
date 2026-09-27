@@ -152,7 +152,7 @@ func TestIntegrationMigrateAndUndo(t *testing.T) {
 
 			// the migrations must land in the schema the connection points at,
 			// not in the one gofly keeps its history in
-			exists, err := gofly.Connection.Dialect().TableExists(gofly.Connection.DB(), "", "gofly_a")
+			exists, err := gofly.Connection.Dialect().TableExists(gofly.Connection.DB(), gofly.defaultSchema, "gofly_a")
 			if err != nil {
 				t.Fatalf("cannot look up gofly_a: %v", err)
 			}
@@ -238,7 +238,7 @@ func TestIntegrationGroupRollsBackEverything(t *testing.T) {
 				t.Fatalf("cannot read the history: %v", err)
 			}
 
-			exists, err := dialect.TableExists(gofly.Connection.DB(), "", "gofly_a")
+			exists, err := dialect.TableExists(gofly.Connection.DB(), gofly.defaultSchema, "gofly_a")
 			if err != nil {
 				t.Fatalf("cannot look up gofly_a: %v", err)
 			}

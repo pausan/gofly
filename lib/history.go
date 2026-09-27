@@ -66,7 +66,7 @@ func (h *SchemaHistory) QualifiedName() string {
 // Exists
 // -----------------------------------------------------------------------------
 func (h *SchemaHistory) Exists() (bool, error) {
-	return h.connection.Dialect().TableExists(h.connection.DB(), h.schema, h.table)
+	return h.connection.Dialect().TableExists(h.connection.sessionDB(), h.schema, h.table)
 }
 
 // -----------------------------------------------------------------------------
@@ -76,7 +76,7 @@ func (h *SchemaHistory) Exists() (bool, error) {
 // -----------------------------------------------------------------------------
 func (h *SchemaHistory) Create() error {
 	dialect := h.connection.Dialect()
-	db := h.connection.DB()
+	db := h.connection.sessionDB()
 
 	if h.schema != "" && dialect.SupportsSchemas() {
 		exists, err := dialect.SchemaExists(db, h.schema)
@@ -109,7 +109,7 @@ func (h *SchemaHistory) Create() error {
 // -----------------------------------------------------------------------------
 func (h *SchemaHistory) CreateAndImport(sourceSchema, sourceTable string, importHistory bool) (int, error) {
 	dialect := h.connection.Dialect()
-	db := h.connection.DB()
+	db := h.connection.sessionDB()
 	statements := []string{}
 	if h.schema != "" && dialect.SupportsSchemas() {
 		exists, err := dialect.SchemaExists(db, h.schema)
@@ -193,7 +193,7 @@ func (h *SchemaHistory) All() ([]*AppliedMigration, error) {
 	query := `SELECT ` + h.columnList() + ` FROM ` + h.QualifiedName() + ` ORDER BY "installed_rank"`
 	query = h.rewriteQuotes(query)
 
-	rows, err := h.connection.DB().Query(query)
+	rows, err := h.connection.sessionDB().Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +266,7 @@ func (h *SchemaHistory) UpdateChecksum(installedRank int, description string, mi
 		checksumValue = *checksum
 	}
 
-	_, err := h.connection.DB().Exec(h.rewriteQuotes(statement),
+	_, err := h.connection.sessionDB().Exec(h.rewriteQuotes(statement),
 		AbbreviateDescription(description), string(migrationType), checksumValue, installedRank)
 
 	return err
@@ -285,7 +285,7 @@ func (h *SchemaHistory) MarkAsDeleted(installedRank int) error {
 		` SET "type" = ` + dialect.Placeholder(1) +
 		` WHERE "installed_rank" = ` + dialect.Placeholder(2)
 
-	_, err := h.connection.DB().Exec(h.rewriteQuotes(statement), string(MigrationTypeDelete), installedRank)
+	_, err := h.connection.sessionDB().Exec(h.rewriteQuotes(statement), string(MigrationTypeDelete), installedRank)
 
 	return err
 }
@@ -302,7 +302,7 @@ func (h *SchemaHistory) RemoveFailed() (int64, error) {
 	statement := "DELETE FROM " + h.QualifiedName() +
 		` WHERE "success" = ` + dialect.BooleanLiteral(false)
 
-	result, err := h.connection.DB().Exec(h.rewriteQuotes(statement))
+	result, err := h.connection.sessionDB().Exec(h.rewriteQuotes(statement))
 	if err != nil {
 		return 0, err
 	}
@@ -317,7 +317,7 @@ func (h *SchemaHistory) NextInstalledRank() (int, error) {
 	query := h.rewriteQuotes(`SELECT MAX("installed_rank") FROM ` + h.QualifiedName())
 
 	var highest sql.NullInt64
-	if err := h.connection.DB().QueryRow(query).Scan(&highest); err != nil {
+	if err := h.connection.sessionDB().QueryRow(query).Scan(&highest); err != nil {
 		return 0, err
 	}
 
@@ -335,7 +335,7 @@ func (h *SchemaHistory) NextInstalledRank() (int, error) {
 // -----------------------------------------------------------------------------
 func (h *SchemaHistory) ImportFromFlyway(flywaySchema string, flywayTable string) (int, error) {
 	dialect := h.connection.Dialect()
-	db := h.connection.DB()
+	db := h.connection.sessionDB()
 
 	exists, err := dialect.TableExists(db, flywaySchema, flywayTable)
 	if err != nil {

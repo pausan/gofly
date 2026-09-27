@@ -36,7 +36,7 @@ func (d *mssqlDialect) Placeholder(index int) string {
 // -----------------------------------------------------------------------------
 // DefaultSchema
 // -----------------------------------------------------------------------------
-func (d *mssqlDialect) DefaultSchema(db *sql.DB, excluding string) (string, error) {
+func (d *mssqlDialect) DefaultSchema(db Database, excluding string) (string, error) {
 	var schema sql.NullString
 	if err := db.QueryRow(`SELECT SCHEMA_NAME()`).Scan(&schema); err != nil {
 		return "", err
@@ -66,7 +66,7 @@ func (d *mssqlDialect) SupportsSchemas() bool {
 // -----------------------------------------------------------------------------
 // SchemaExists
 // -----------------------------------------------------------------------------
-func (d *mssqlDialect) SchemaExists(db *sql.DB, schema string) (bool, error) {
+func (d *mssqlDialect) SchemaExists(db Database, schema string) (bool, error) {
 	var found int
 	err := db.QueryRow(
 		`SELECT 1 FROM sys.schemas WHERE name = @p1`, schema,
@@ -95,7 +95,7 @@ func (d *mssqlDialect) CreateSchemaSQL(schema string) []string {
 // -----------------------------------------------------------------------------
 // TableExists
 // -----------------------------------------------------------------------------
-func (d *mssqlDialect) TableExists(db *sql.DB, schema string, table string) (bool, error) {
+func (d *mssqlDialect) TableExists(db Database, schema string, table string) (bool, error) {
 	if schema == "" {
 		var found int
 		err := db.QueryRow(
@@ -165,7 +165,7 @@ func (d *mssqlDialect) BooleanLiteral(value bool) string {
 // SQL Server binds the default schema to the user, not to the session, so there
 // is nothing to switch here: gofly always qualifies its own table instead.
 // -----------------------------------------------------------------------------
-func (d *mssqlDialect) SetSessionSchema(db *sql.DB, schema string) error {
+func (d *mssqlDialect) SetSessionSchema(db Database, schema string) error {
 	return nil
 }
 

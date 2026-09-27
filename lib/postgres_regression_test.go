@@ -62,7 +62,7 @@ func newPostgresRegression(t *testing.T, files map[string]string, configure ...f
 // -----------------------------------------------------------------------------
 func regressionExec(t *testing.T, g *Gofly, statement string) {
 	t.Helper()
-	if _, err := g.Connection.DB().Exec(statement); err != nil {
+	if _, err := g.Connection.sessionDB().Exec(statement); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -402,5 +402,157 @@ func TestPostgresRecordsFailuresOnlyWhenChangesCanRemain(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresConcurrentMigratorsExecuteSQLOnce
+// -----------------------------------------------------------------------------
+func TestPostgresConcurrentMigratorsExecuteSQLOnce(t *testing.T) {
+	for _, fresh := range []bool{false, true} {
+		t.Run(fmt.Sprint(fresh), func(t *testing.T) {
+			files := map[string]string{"V1__base.sql": "CREATE TABLE events(v int); CREATE SEQUENCE attempts;"}
+			g := newPostgresRegression(t, files)
+			if !fresh {
+				if _, err := g.Migrate(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(g.Config.Locations[0]+"/V2__slow.sql", []byte("SELECT nextval('attempts'); SELECT pg_sleep(0.3); INSERT INTO events VALUES(2);"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			peer, err := New(g.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer peer.Close()
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			for _, runner := range []*Gofly{g, peer} {
+				go func(r *Gofly) { <-start; _, err := r.Migrate(); results <- err }(runner)
+			}
+			close(start)
+			for i := 0; i < 2; i++ {
+				if err := <-results; err != nil {
+					t.Errorf("concurrent migrate: %v", err)
+				}
+			}
+			var attempts int
+			if err := g.Connection.DB().QueryRow("SELECT last_value FROM attempts").Scan(&attempts); err != nil {
+				t.Fatal(err)
+			}
+			if attempts != 1 {
+				t.Errorf("migration SQL executed %d times", attempts)
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresMutatingCommandsWaitForAndReleaseTheHistoryLock
+// -----------------------------------------------------------------------------
+func TestPostgresMutatingCommandsWaitForAndReleaseTheHistoryLock(t *testing.T) {
+	for _, command := range []string{"migrate", "undo", "repair", "baseline", "history"} {
+		t.Run(command, func(t *testing.T) {
+			g := newPostgresRegression(t, map[string]string{})
+			owner, err := Connect(g.Config.URL, g.Config.User, g.Config.Password, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer owner.Close()
+			key := postgresHistoryLockKey(g.History.QualifiedName())
+			if _, err := owner.DB().Exec("SELECT pg_advisory_lock($1)", key); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				var err error
+				switch command {
+				case "migrate":
+					_, err = g.Migrate()
+				case "undo":
+					_, err = g.Undo()
+				case "repair":
+					_, err = g.Repair()
+				case "baseline":
+					err = g.Baseline()
+				case "history":
+					err = g.EnsureHistory()
+				}
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				t.Fatalf("command bypassed lock: %v", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+			if _, err := owner.DB().Exec("SELECT pg_advisory_unlock($1)", key); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			var available bool
+			if err := owner.DB().QueryRow("SELECT pg_try_advisory_lock($1)", key).Scan(&available); err != nil {
+				t.Fatal(err)
+			}
+			if !available {
+				t.Error("command leaked its lock")
+			}
+			if _, err := owner.DB().Exec("SELECT pg_advisory_unlock($1)", key); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresWaitingMigratorRevalidatesConflictingFiles
+// -----------------------------------------------------------------------------
+func TestPostgresWaitingMigratorRevalidatesConflictingFiles(t *testing.T) {
+	first := "CREATE TABLE events(v int); CREATE SEQUENCE attempts;"
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": first})
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(g.Config.Locations[0]+"/V2__slow.sql", []byte("SELECT nextval('attempts'); SELECT pg_sleep(0.5); INSERT INTO events VALUES(2);"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config := *g.Config
+	config.Locations = []string{writeFilesInDir(t, map[string]string{"V1__base.sql": first, "V2__slow.sql": "SELECT nextval('attempts'); INSERT INTO events VALUES(200);"})}
+	peer, err := New(&config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	done := make(chan error, 1)
+	go func() { _, err := g.Migrate(); done <- err }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var started bool
+		if err := g.Connection.DB().QueryRow("SELECT is_called FROM attempts").Scan(&started); err != nil {
+			t.Fatal(err)
+		}
+		if started {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first runner did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	_, peerErr := peer.Migrate()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if peerErr == nil {
+		t.Fatal("waiting migration did not revalidate its conflicting checksum")
+	}
+	var attempts int
+	if err := g.Connection.DB().QueryRow("SELECT last_value FROM attempts").Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 {
+		t.Errorf("conflicting SQL executed: attempts=%d", attempts)
 	}
 }

@@ -11,15 +11,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Gofly ties together a configuration, a connection and its schema history
 type Gofly struct {
-	Config     *Config
-	Connection *Connection
-	History    *SchemaHistory
-	Output     io.Writer
+	operationMu sync.Mutex
+	Config      *Config
+	Connection  *Connection
+	History     *SchemaHistory
+	Output      io.Writer
 
 	// historySchema is where the gofly history table lives, resolved once
 	historySchema string
@@ -54,6 +56,9 @@ func New(config *Config) (*Gofly, error) {
 // Same as New for an already open connection, which is what the tests use.
 // -----------------------------------------------------------------------------
 func NewWithConnection(config *Config, connection *Connection) (*Gofly, error) {
+	if err := connection.pinSession(); err != nil {
+		return nil, err
+	}
 	dialect := connection.Dialect()
 
 	// the history schema has to be known first: the schema the migrations run
@@ -71,7 +76,7 @@ func NewWithConnection(config *Config, connection *Connection) (*Gofly, error) {
 		defaultSchema = config.Schemas[0]
 	}
 	if defaultSchema == "" {
-		resolved, err := dialect.DefaultSchema(connection.DB(), historySchema)
+		resolved, err := dialect.DefaultSchema(connection.sessionDB(), historySchema)
 		if err != nil {
 			return nil, fmt.Errorf("cannot determine the default schema: %w", err)
 		}
@@ -80,7 +85,7 @@ func NewWithConnection(config *Config, connection *Connection) (*Gofly, error) {
 
 	// pin the session to it, so that a migration saying CREATE TABLE with no
 	// schema always lands in the same place, run after run
-	if err := dialect.SetSessionSchema(connection.DB(), defaultSchema); err != nil {
+	if err := dialect.SetSessionSchema(connection.sessionDB(), defaultSchema); err != nil {
 		return nil, err
 	}
 
@@ -110,7 +115,7 @@ func (g *Gofly) Close() error {
 // imports whatever an earlier Flyway installation left behind so that the
 // history and the checksums carry on where Flyway stopped.
 // -----------------------------------------------------------------------------
-func (g *Gofly) EnsureHistory() error {
+func (g *Gofly) ensureHistory() error {
 	if err := g.ensureApplicationSchemas(); err != nil {
 		return err
 	}
@@ -233,7 +238,7 @@ func (g *Gofly) flywayHistory() (*SchemaHistory, bool, error) {
 		schema = ""
 	}
 
-	exists, err := g.Connection.Dialect().TableExists(g.Connection.DB(), schema, g.Config.FlywayTable)
+	exists, err := g.Connection.Dialect().TableExists(g.Connection.sessionDB(), schema, g.Config.FlywayTable)
 	if err != nil || !exists {
 		return nil, false, err
 	}
@@ -378,11 +383,11 @@ type MigrateResult struct {
 // inside a single transaction, so either the database ends up fully migrated or
 // completely untouched.
 // -----------------------------------------------------------------------------
-func (g *Gofly) Migrate() (*MigrateResult, error) {
+func (g *Gofly) migrate() (*MigrateResult, error) {
 	if err := g.checkUnmanagedSchema(); err != nil {
 		return nil, err
 	}
-	if err := g.EnsureHistory(); err != nil {
+	if err := g.ensureHistory(); err != nil {
 		return nil, err
 	}
 
@@ -623,7 +628,7 @@ func (g *Gofly) recordFailure(migration *ResolvedMigration, rank int, elapsed in
 
 	// the insert goes through the connection rather than the rolled back
 	// transaction, which is the only way it can survive
-	return g.History.Insert(g.Connection.DB(), g.appliedRowFor(migration, rank, elapsed, false))
+	return g.History.Insert(g.Connection.sessionDB(), g.appliedRowFor(migration, rank, elapsed, false))
 }
 
 // -----------------------------------------------------------------------------
@@ -659,8 +664,8 @@ type UndoResult struct {
 // script is available and the version stays above the target. With -group they
 // all run inside a single transaction.
 // -----------------------------------------------------------------------------
-func (g *Gofly) Undo() (*UndoResult, error) {
-	if err := g.EnsureHistory(); err != nil {
+func (g *Gofly) undo() (*UndoResult, error) {
+	if err := g.ensureHistory(); err != nil {
 		return nil, err
 	}
 
@@ -827,8 +832,8 @@ func (g *Gofly) undoOneByOne(resolved *ResolvedMigrations, toUndo []*MigrationIn
 // Marks an existing database as migrated up to the baseline version, so that
 // only the migrations above it are ever applied.
 // -----------------------------------------------------------------------------
-func (g *Gofly) Baseline() error {
-	if err := g.EnsureHistory(); err != nil {
+func (g *Gofly) baseline() error {
+	if err := g.ensureHistory(); err != nil {
 		return err
 	}
 
@@ -871,7 +876,7 @@ func (g *Gofly) Baseline() error {
 		Success:       true,
 	}
 
-	if err := g.History.Insert(g.Connection.DB(), row); err != nil {
+	if err := g.History.Insert(g.Connection.sessionDB(), row); err != nil {
 		return err
 	}
 
@@ -907,7 +912,7 @@ func (g *Gofly) baselineOnMigrate() error {
 		return nil
 	}
 
-	return g.Baseline()
+	return g.baseline()
 }
 
 // RepairResult reports what a repair run did
@@ -924,8 +929,8 @@ type RepairResult struct {
 // descriptions and types with the files on disk, and marks as deleted the
 // applied migrations whose file is gone.
 // -----------------------------------------------------------------------------
-func (g *Gofly) Repair() (*RepairResult, error) {
-	if err := g.EnsureHistory(); err != nil {
+func (g *Gofly) repair() (*RepairResult, error) {
+	if err := g.ensureHistory(); err != nil {
 		return nil, err
 	}
 

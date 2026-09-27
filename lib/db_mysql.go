@@ -40,7 +40,7 @@ func (d *mysqlDialect) Placeholder(index int) string {
 // -----------------------------------------------------------------------------
 // DefaultSchema
 // -----------------------------------------------------------------------------
-func (d *mysqlDialect) DefaultSchema(db *sql.DB, excluding string) (string, error) {
+func (d *mysqlDialect) DefaultSchema(db Database, excluding string) (string, error) {
 	var schema sql.NullString
 	if err := db.QueryRow(`SELECT DATABASE()`).Scan(&schema); err != nil {
 		return "", err
@@ -70,7 +70,7 @@ func (d *mysqlDialect) SupportsSchemas() bool {
 // -----------------------------------------------------------------------------
 // SchemaExists
 // -----------------------------------------------------------------------------
-func (d *mysqlDialect) SchemaExists(db *sql.DB, schema string) (bool, error) {
+func (d *mysqlDialect) SchemaExists(db Database, schema string) (bool, error) {
 	var found int
 	err := db.QueryRow(
 		`SELECT 1 FROM information_schema.schemata WHERE schema_name = ?`, schema,
@@ -89,7 +89,7 @@ func (d *mysqlDialect) CreateSchemaSQL(schema string) []string {
 // -----------------------------------------------------------------------------
 // TableExists
 // -----------------------------------------------------------------------------
-func (d *mysqlDialect) TableExists(db *sql.DB, schema string, table string) (bool, error) {
+func (d *mysqlDialect) TableExists(db Database, schema string, table string) (bool, error) {
 	if schema == "" {
 		var found int
 		err := db.QueryRow(
@@ -158,7 +158,7 @@ func (d *mysqlDialect) BooleanLiteral(value bool) string {
 // -----------------------------------------------------------------------------
 // SetSessionSchema
 // -----------------------------------------------------------------------------
-func (d *mysqlDialect) SetSessionSchema(db *sql.DB, schema string) error {
+func (d *mysqlDialect) SetSessionSchema(db Database, schema string) error {
 	if schema == "" {
 		return nil
 	}

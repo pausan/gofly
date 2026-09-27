@@ -72,7 +72,7 @@ func (g *Gofly) schemaEmpty(schema string) (bool, error) {
 		return false, fmt.Errorf("cannot inspect schema for %s", g.Connection.Dialect().Name())
 	}
 	var count int
-	if err := g.Connection.DB().QueryRow(query, args...).Scan(&count); err != nil {
+	if err := g.Connection.sessionDB().QueryRow(query, args...).Scan(&count); err != nil {
 		return false, err
 	}
 	return count == 0, nil
@@ -114,7 +114,7 @@ func (g *Gofly) ensureApplicationSchemas() error {
 		return nil
 	}
 	for _, schema := range g.applicationSchemas() {
-		exists, err := dialect.SchemaExists(g.Connection.DB(), schema)
+		exists, err := dialect.SchemaExists(g.Connection.sessionDB(), schema)
 		if err != nil {
 			return err
 		}
@@ -122,10 +122,10 @@ func (g *Gofly) ensureApplicationSchemas() error {
 			continue
 		}
 		for _, statement := range dialect.CreateSchemaSQL(schema) {
-			if _, err := g.Connection.DB().Exec(statement); err != nil {
+			if _, err := g.Connection.sessionDB().Exec(statement); err != nil {
 				return fmt.Errorf("cannot create application schema %s: %w", schema, err)
 			}
 		}
 	}
-	return dialect.SetSessionSchema(g.Connection.DB(), g.defaultSchema)
+	return dialect.SetSessionSchema(g.Connection.sessionDB(), g.defaultSchema)
 }

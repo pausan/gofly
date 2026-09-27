@@ -45,8 +45,8 @@ func (g *Gofly) schemasEmpty() (bool, error) {
 // -----------------------------------------------------------------------------
 func (g *Gofly) schemaEmpty(schema string) (bool, error) {
 	history := ""
-	if schema == g.historySchema || g.historySchema == "" || !g.Connection.Dialect().SupportsSchemas() {
-		history = g.Config.Table
+	if schema == g.History.schema || g.History.schema == "" || !g.Connection.Dialect().SupportsSchemas() {
+		history = g.History.table
 	}
 	var query string
 	args := []any{schema, history}

@@ -43,8 +43,9 @@ type Config struct {
 	Table         string
 
 	// importing an existing Flyway history
-	FlywayTable      string
-	ImportFromFlyway bool
+	FlywayTable        string
+	ImportFromFlyway   bool
+	ReuseFlywayHistory bool
 
 	// migration discovery
 	Locations []string
@@ -160,6 +161,7 @@ func NewConfig() *Config {
 		Table:                  DefaultGoflyTable,
 		FlywayTable:            FlywayTable,
 		ImportFromFlyway:       true,
+		ReuseFlywayHistory:     true,
 		Locations:              []string{"filesystem:sql"},
 		Encoding:               "UTF-8",
 		Naming:                 DefaultNaming(),
@@ -250,6 +252,8 @@ func (c *Config) applyProperty(key string, value string) error {
 		c.Table = value
 	case "flywaytable":
 		c.FlywayTable = value
+	case "reuseflywayhistory":
+		return setBool(&c.ReuseFlywayHistory, key, value)
 	case "importfromflyway":
 		return setBool(&c.ImportFromFlyway, key, value)
 	case "locations":

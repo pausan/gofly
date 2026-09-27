@@ -76,40 +76,37 @@ variables all work. See [configuration.md](configuration.md); note that the
 
 ## Taking over from Flyway
 
-Point gofly at a database Flyway has been migrating and run `migrate`. On that
-first run gofly:
+An existing Flyway history is now reused as the writable history by default.
+Both tools then see the same applied migrations, so switching back does not replay
+changes. On PostgreSQL they also use compatible advisory locks on that history.
+The application schema and search path stay unchanged.
 
-1. creates `gofly_schema_history`, in the `gofly` schema where the database has
-   schemas;
-2. copies every row of `flyway_schema_history` into it — checksums, timestamps,
-   `installed_by`, execution times and all;
-3. carries on from there.
+Use `--reuseFlywayHistory=false` for a separate-history import. This copies
+checksums, installation timestamps and other history fields into gofly's own
+table while leaving the source unchanged. On PostgreSQL, SQLite and SQL Server,
+history creation and import commit atomically. A failed import can be retried
+without replaying applied migrations.
 
-On PostgreSQL, SQLite and SQL Server, creating the new history and importing
-its rows commit together. If the import fails, retry imports the original
-history again instead of replaying its migrations.
+Separate histories are not safe for alternating or concurrent Flyway/gofly runs:
+the source becomes stale after gofly applies anything new. Before switching back,
+point both tools at the same authoritative table and preserve the application
+schema. For example, a private history in `public.gofly_schema_history` is used
+by gofly with `--goflySchema=public` and Flyway with
+`-table=gofly_schema_history`; this avoids changing the schema for unqualified SQL.
 
-`flyway_schema_history` is only ever read. It is never written to and never
-dropped, so going back to Flyway remains possible. `--importFromFlyway=false`
-skips the import.
+If both private and Flyway histories already exist, the default refuses to guess
+which is authoritative. Reconcile them and explicitly configure one shared table,
+or retain solo private-history operation with `--reuseFlywayHistory=false`.
+Disabling `--importFromFlyway` disables both reuse and import.
 
-Because the checksums are identical, a migration that was edited after Flyway
-applied it still fails validation afterwards. The import moves the history
-across; it does not paper over what is wrong with it.
-
-`info` and `validate` never import anything. On a database gofly has not taken
-over yet they read `flyway_schema_history` directly and say so, so you can check
-compatibility before committing to the switch:
-
-```sh
-gofly --url=... --locations=filesystem:./sql validate
-```
+`info` and `validate` remain read-only: they do not create or import history and
+can validate against an existing Flyway table before takeover.
 
 ## Where gofly differs on purpose
 
 | | Flyway | gofly | Why |
 |---|---|---|---|
-| History table | `flyway_schema_history` in the default schema | `gofly_schema_history`, in the `gofly` schema where there is one | The two tools can manage the same database side by side during a migration |
+| History table | `flyway_schema_history` in the default schema | Reuses an existing Flyway history; otherwise creates `gofly_schema_history` | Sharing one history prevents migration replay during handover |
 | Undo | Teams edition only | included | It is a small feature and a useful one |
 | `--group` | Teams edition only | included | All-or-nothing is the behaviour most people expect |
 | Encoding | `--encoding`, `--detectEncoding` | always UTF-8 | Anything else in a migration in 2026 is a bug worth fixing at the source |

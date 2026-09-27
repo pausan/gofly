@@ -119,7 +119,7 @@ of `${db_name}`. The delimiters are configurable with `--placeholderPrefix` and
 
 Each migration runs in its own transaction by default, exactly like Flyway.
 
-With `--group=true` the whole pending batch runs in a single transaction: either
+With `--group=true` a fully transactional pending batch runs in one transaction: either
 every migration is applied or the database is untouched and the history stays
 empty.
 
@@ -130,7 +130,7 @@ otherwise.
 
 ### What a failure leaves behind
 
-When a migration fails on an engine that can roll DDL back, the changes are gone
+When a transactional migration fails on an engine that can roll DDL back, the changes are gone
 and **no failed row is recorded** — there is nothing to repair, and the
 migration simply stays pending. Where DDL commits implicitly, half the migration
 is still there, so the failure *is* recorded and blocks the next run until

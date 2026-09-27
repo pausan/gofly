@@ -320,6 +320,7 @@ func TestIntegrationImportsAFlywayHistory(t *testing.T) {
 				"V2__Create_b.sql": "CREATE TABLE gofly_b (id INT);\n",
 			})
 			config.ImportFromFlyway = true
+			config.ReuseFlywayHistory = false
 			config.FlywayTable = "gofly_fake_flyway_history"
 
 			gofly := openIntegration(t, config, []string{"gofly_a", "gofly_b"})

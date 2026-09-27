@@ -505,6 +505,7 @@ func TestCompatHandoverFromFlyway(t *testing.T) {
 		handover.MustRunFlyway("-target=2", "migrate")
 
 		gofly := handover.Gofly(nil)
+		gofly.Config.ReuseFlywayHistory = false
 		result, err := gofly.Migrate()
 		if err != nil {
 			t.Fatalf("gofly migrate failed: %v", err)

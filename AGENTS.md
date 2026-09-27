@@ -38,6 +38,14 @@ test/e2e/            the Flyway compatibility harness
 docs/                cli, configuration, migrations, compatibility
 ```
 
+## Shared history and PostgreSQL operations
+
+Existing Flyway history is reused by default. The separate-history import is
+explicit (`reuseFlywayHistory=false`); its source remains read-only. Refuse
+ambiguous dual histories rather than choosing stale state. PostgreSQL mutation
+locks must cover history selection, validation, SQL and history updates on one
+pinned physical connection, and use Flyway-compatible advisory lock keys.
+
 ## The rules that matter
 
 ### 1. Never change the checksum algorithm

@@ -385,7 +385,8 @@ Schema history
   --goflySchema=gofly                Schema holding it (PostgreSQL and SQL Server)
   --defaultSchema=...                Schema the migrations run against
   --flywayTable=flyway_schema_history
-  --importFromFlyway=true            Import an existing Flyway history on first run
+  --importFromFlyway=true            Allow existing Flyway history reuse or import
+  --reuseFlywayHistory=true          Reuse existing Flyway history; false copies it
 
 Other
   --configFiles=a.conf,b.conf    Flyway style properties files

@@ -16,6 +16,7 @@ import (
 // fills it with the given rows.
 // -----------------------------------------------------------------------------
 func (s *testSetup) createFlywayHistory(rows []string) {
+	s.config.ReuseFlywayHistory = false
 	s.t.Helper()
 
 	db, err := sql.Open("sqlite", s.dbPath)

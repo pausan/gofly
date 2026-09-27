@@ -34,8 +34,8 @@ Before doing anything it validates (unless `--validateOnMigrate=false`), so a
 migration that was edited after being applied stops the run. Pending migrations
 are of course not an error here, they are the point.
 
-The first time it runs against a database it creates its own history table and,
-if a Flyway history is already there, imports it. See
+An existing Flyway history is reused by default. Otherwise gofly creates its own
+history. Set `--reuseFlywayHistory=false` to request the legacy separate import. See
 [compatibility.md](compatibility.md#taking-over-from-flyway).
 
 ```sh
@@ -250,12 +250,13 @@ setting stays yours to make.
 | `--defaultSchema` | the connection's own | Schema the migrations run against |
 | `--schemas` | — | Comma separated application schemas, created before mutation; the first is the default schema |
 | `--flywayTable` | `flyway_schema_history` | The table to import from and validate against |
-| `--importFromFlyway` | `true` | Import an existing Flyway history on the first run |
+| `--importFromFlyway` | `true` | Allow reuse or import of an existing Flyway history |
+| `--reuseFlywayHistory` | `true` | Reuse an existing Flyway table as the writable history; false requests a separate import |
 
 `--table` is Flyway's name for its own history table and sets `--goflyTable`;
 the two are the same option. The `gofly`/`flyway` pairs sit next to each other
 deliberately: `--goflyTable` and `--goflySchema` say where gofly writes,
-`--flywayTable` says where it reads a pre-existing Flyway history from.
+`--flywayTable` selects the existing Flyway table to reuse or import.
 
 ### Placeholders
 

@@ -228,6 +228,7 @@ func resetStatements(dialect string) []string {
 
 	switch dialect {
 	case lib.DialectPostgres:
+		statements = append(statements, "DROP SEQUENCE IF EXISTS e2e_attempts")
 		statements = append(statements, "DROP SCHEMA IF EXISTS "+lib.DefaultGoflySchema+" CASCADE")
 		for _, table := range tables {
 			statements = append(statements, `DROP TABLE IF EXISTS "`+table+`" CASCADE`)

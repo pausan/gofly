@@ -25,8 +25,8 @@ migrated by gofly can still be read by Flyway.
   everything, with the same message Flyway prints.
 - **All-or-nothing migrations** — `--group=true` runs the whole batch in one
   transaction.
-- **Its own history schema**, and a one-off import of an existing Flyway history
-  the first time it runs against a database.
+- **Shared Flyway history** when one exists, or a private history with an optional
+  one-off import; PostgreSQL runners coordinate with advisory locks.
 - **PostgreSQL, MySQL / MariaDB, SQL Server and SQLite.**
 
 ## Install
@@ -144,32 +144,35 @@ gofly info --url=mysql://localhost:3306/artypistdb --user=myuser --pass=mypass
 
 ## Taking over from Flyway
 
-Point gofly at a database Flyway has been migrating and run `migrate`. On that
-first run gofly:
+An existing Flyway history is now reused as the writable history by default.
+Both tools then see the same applied migrations, so switching back does not replay
+changes. On PostgreSQL they also use compatible advisory locks on that history.
+The application schema and search path stay unchanged.
 
-1. creates its own history table, `gofly_schema_history`, in its own schema
-   (`gofly`) where the database has schemas;
-2. copies every row of `flyway_schema_history` into it, checksums, timestamps,
-   `installed_by` and all;
-3. carries on from there.
+Use `--reuseFlywayHistory=false` for a separate-history import. This copies
+checksums, installation timestamps and other history fields into gofly's own
+table while leaving the source unchanged. On PostgreSQL, SQLite and SQL Server,
+history creation and import commit atomically. A failed import can be retried
+without replaying applied migrations.
 
-`flyway_schema_history` is only ever read, never written to and never dropped,
-so going back to Flyway stays possible. Pass `--importFromFlyway=false` to skip
-the import.
+Separate histories are not safe for alternating or concurrent Flyway/gofly runs:
+the source becomes stale after gofly applies anything new. Before switching back,
+point both tools at the same authoritative table and preserve the application
+schema. For example, a private history in `public.gofly_schema_history` is used
+by gofly with `--goflySchema=public` and Flyway with
+`-table=gofly_schema_history`; this avoids changing the schema for unqualified SQL.
 
-`info` and `validate` never import anything. On a database gofly has not taken
-over yet they read `flyway_schema_history` directly and say so, so you can check
-compatibility before committing to the switch:
+If both private and Flyway histories already exist, the default refuses to guess
+which is authoritative. Reconcile them and explicitly configure one shared table,
+or retain solo private-history operation with `--reuseFlywayHistory=false`.
+Disabling `--importFromFlyway` disables both reuse and import.
 
-```sh
-gofly --url=... --locations=filesystem:./sql validate
-```
-
-Because the checksums are identical, a migration that was edited after Flyway
-applied it still fails validation afterwards. The import moves the history
-across, it does not paper over what is wrong with it.
+`info` and `validate` remain read-only: they do not create or import history and
+can validate against an existing Flyway table before takeover.
 
 ### Where the history lives
+
+For a fresh database without Flyway history:
 
 | Database   | Default location |
 |------------|------------------|
@@ -187,11 +190,11 @@ Both names are configurable, with `--goflySchema` and `--goflyTable`. Flyway's
 
 ## Transactions
 
-By default each migration runs in its own transaction, exactly like Flyway: a
-failure leaves the migrations before it applied and records the failed one, so
-the next run refuses to start until you `repair`.
+By default each migration runs in its own transaction. PostgreSQL transactional
+failures roll back without a failed history row. Nontransactional failures leave
+a failed row and require inspection and repair before retrying.
 
-With `--group=true` the whole batch runs inside a single transaction: either
+With `--group=true` a fully transactional batch runs inside a single transaction: either
 every pending migration is applied, or the database is left untouched and the
 history stays empty.
 

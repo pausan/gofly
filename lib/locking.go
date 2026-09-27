@@ -30,9 +30,14 @@ func (g *Gofly) lockOperation() (func() error, error) {
 	g.operationMu.Lock()
 	unlockLocal := func() error { g.operationMu.Unlock(); return nil }
 	if g.Connection.Dialect().Name() != DialectPostgres {
+		if err := g.selectSharedHistory(); err != nil {
+			unlockLocal()
+			return nil, err
+		}
 		return unlockLocal, nil
 	}
-	names := []string{g.History.QualifiedName()}
+	private := NewSchemaHistory(g.Connection, g.historySchema, g.Config.Table, g.Config.ResolveInstalledBy())
+	names := []string{private.QualifiedName()}
 	if g.Config.ImportFromFlyway && g.Config.FlywayTable != "" {
 		names = append(names, g.Connection.Dialect().QuoteIdentifier(g.defaultSchema, g.Config.FlywayTable))
 	}
@@ -59,6 +64,9 @@ func (g *Gofly) lockOperation() (func() error, error) {
 			return nil, errors.Join(err, release())
 		}
 		acquired = append(acquired, key)
+	}
+	if err := g.selectSharedHistory(); err != nil {
+		return nil, errors.Join(err, release())
 	}
 	return release, nil
 }

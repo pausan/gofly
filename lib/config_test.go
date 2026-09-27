@@ -623,3 +623,19 @@ func TestConfigPropertyNamesAreCaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestSharedHistoryIsDefaultAndCanBeDisabled
+// -----------------------------------------------------------------------------
+func TestSharedHistoryIsDefaultAndCanBeDisabled(t *testing.T) {
+	config := NewConfig()
+	if !config.ReuseFlywayHistory {
+		t.Fatal("shared Flyway history must be the default")
+	}
+	if err := config.Set("reuseFlywayHistory", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if config.ReuseFlywayHistory {
+		t.Fatal("cannot request separate import")
+	}
+}

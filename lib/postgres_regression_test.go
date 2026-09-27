@@ -90,6 +90,7 @@ func TestPostgresImportFailureIsAtomicAndRetryDoesNotReplay(t *testing.T) {
 	first := "CREATE TABLE IF NOT EXISTS events(v int); INSERT INTO events VALUES(1);"
 	g := newPostgresRegression(t, map[string]string{"V1__base.sql": first, "V2__next.sql": "INSERT INTO events VALUES(2);"})
 	seedRegressionFlyway(t, g, first)
+	g.Config.ReuseFlywayHistory = false
 	blocker, err := Connect(g.Config.URL, g.Config.User, g.Config.Password, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -554,5 +555,59 @@ func TestPostgresWaitingMigratorRevalidatesConflictingFiles(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Errorf("conflicting SQL executed: attempts=%d", attempts)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresReusesExistingFlywayHistoryForFutureRuns
+// -----------------------------------------------------------------------------
+func TestPostgresReusesExistingFlywayHistoryForFutureRuns(t *testing.T) {
+	first := "CREATE TABLE events(v int); INSERT INTO events VALUES(1);"
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": first, "V2__next.sql": "INSERT INTO events VALUES(2);"})
+	seedRegressionFlyway(t, g, first)
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	source := NewSchemaHistory(g.Connection, "public", FlywayTable, "flyway")
+	rows, err := source.All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("Flyway history is stale: got %d rows, want 2", len(rows))
+	}
+	peer, err := New(g.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	result, err := peer.Migrate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MigrationsExecuted != 0 {
+		t.Fatal("subsequent process replayed a migration")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresRefusesToGuessBetweenExistingHistories
+// -----------------------------------------------------------------------------
+func TestPostgresRefusesToGuessBetweenExistingHistories(t *testing.T) {
+	first := "CREATE TABLE events(v int); INSERT INTO events VALUES(1);"
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": first, "V2__next.sql": "INSERT INTO events VALUES(2);"})
+	seedRegressionFlyway(t, g, first)
+	if err := g.History.Create(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Migrate(); err == nil {
+		t.Fatal("two existing histories were silently accepted")
+	}
+	var count int
+	if err := g.Connection.DB().QueryRow("SELECT count(*) FROM events").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("ambiguous history caused data changes")
 	}
 }

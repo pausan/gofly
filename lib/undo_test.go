@@ -289,6 +289,7 @@ func TestBaselineRefusesOnAnAlreadyMigratedDatabase(t *testing.T) {
 // -----------------------------------------------------------------------------
 func TestBaselineOnMigrate(t *testing.T) {
 	setup := newTestSetup(t)
+	mustExec(t, setup.dbPath, "CREATE TABLE legacy(id INT)")
 	setup.write("V1__a.sql", "CREATE TABLE a (id INT);\n")
 	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
 	setup.config.BaselineOnMigrate = true
@@ -411,5 +412,18 @@ func TestRepairMarksMissingMigrationsAsDeleted(t *testing.T) {
 	}
 	if !validation.Valid() {
 		t.Errorf("validation still complains: %v", validation.Error())
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestBaselineOnMigrateDoesNotSkipAnEmptyDatabase
+// -----------------------------------------------------------------------------
+func TestBaselineOnMigrateDoesNotSkipAnEmptyDatabase(t *testing.T) {
+	setup := newTestSetup(t)
+	setup.config.BaselineOnMigrate = true
+	setup.write("V1__base.sql", "CREATE TABLE events(v int);")
+	setup.write("V2__next.sql", "INSERT INTO events VALUES(2);")
+	if result := setup.mustMigrate(); result.MigrationsExecuted != 2 {
+		t.Errorf("applied %d migrations, want 2", result.MigrationsExecuted)
 	}
 }

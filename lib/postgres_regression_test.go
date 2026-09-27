@@ -157,3 +157,18 @@ func TestPostgresRefusesNonemptySchemaWithoutHistory(t *testing.T) {
 		})
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestPostgresBaselineOnMigrateAppliesV1ToEmptyDatabase
+// -----------------------------------------------------------------------------
+func TestPostgresBaselineOnMigrateAppliesV1ToEmptyDatabase(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int);", "V2__next.sql": "INSERT INTO events VALUES(2);"})
+	g.Config.BaselineOnMigrate = true
+	result, err := g.Migrate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MigrationsExecuted != 2 {
+		t.Errorf("executed %d migrations, want 2", result.MigrationsExecuted)
+	}
+}

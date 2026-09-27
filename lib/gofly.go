@@ -862,6 +862,14 @@ func (g *Gofly) baselineOnMigrate() error {
 		return nil
 	}
 
+	empty, err := g.schemasEmpty()
+	if err != nil {
+		return err
+	}
+	if empty {
+		return nil
+	}
+
 	return g.Baseline()
 }
 

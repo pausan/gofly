@@ -233,7 +233,7 @@ setting stays yours to make.
 | `--validateOnMigrate` | `true` | Validate before migrating |
 | `--baselineVersion` | `1` | Version the `baseline` command records |
 | `--baselineDescription` | `<< Flyway Baseline >>` | Description it records |
-| `--baselineOnMigrate` | `false` | Baseline automatically on the first migrate |
+| `--baselineOnMigrate` | `false` | Baseline an existing nonempty schema on the first migrate; empty schemas run V1 |
 | `--ignoreMissingMigrations` | `false` | Tolerate applied migrations whose file is gone |
 | `--ignoreFutureMigrations` | `true` | Tolerate history rows newer than anything local |
 | `--installedBy` | the connecting user | What to record in `installed_by` |

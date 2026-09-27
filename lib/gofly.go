@@ -474,6 +474,9 @@ func (g *Gofly) migrateGrouped(pending []*MigrationInfo, rank int, result *Migra
 		elapsed, err := g.executeMigration(transaction, migration)
 		if err != nil {
 			transaction.Rollback()
+			if transactional {
+				return g.migrationError(migration, err)
+			}
 			return errors.Join(g.migrationError(migration, err), g.recordFailure(migration, rank, elapsed, transactional))
 		}
 
@@ -766,6 +769,9 @@ func (g *Gofly) undoGrouped(resolved *ResolvedMigrations, toUndo []*MigrationInf
 		elapsed, err := g.executeMigration(transaction, undo)
 		if err != nil {
 			transaction.Rollback()
+			if transactional {
+				return g.migrationError(undo, err)
+			}
 			return errors.Join(g.migrationError(undo, err), g.recordFailure(undo, rank, elapsed, transactional))
 		}
 

@@ -8,6 +8,7 @@ package lib
 
 import (
 	"strings"
+	"unicode"
 )
 
 // Statement is a single executable statement together with the line it starts
@@ -98,7 +99,8 @@ func SplitStatements(sql string, dialect string) []Statement {
 
 		// ---- string literal -----------------------------------------------
 		if char == '\'' {
-			consumed, text := readQuoted(runes, index, '\'', flavour.backslashEscapes)
+			escaped := flavour.backslashEscapes || (flavour.dollarQuoted && postgresEscapePrefix(runes, index))
+			consumed, text := readQuoted(runes, index, '\'', escaped)
 			current.WriteString(text)
 			line += strings.Count(text, "\n")
 			index = consumed
@@ -417,4 +419,21 @@ func isCommentOnly(text string) bool {
 	}
 
 	return strings.TrimSpace(stripped.String()) == ""
+}
+
+// -----------------------------------------------------------------------------
+// postgresEscapePrefix
+//
+// E/e must be a separate token. Ordinary strings retain standard_conforming_strings
+// behavior: a backslash is data, not an escape for the closing quote.
+// -----------------------------------------------------------------------------
+func postgresEscapePrefix(runes []rune, quote int) bool {
+	if quote == 0 || (runes[quote-1] != 'E' && runes[quote-1] != 'e') {
+		return false
+	}
+	if quote == 1 {
+		return true
+	}
+	previous := runes[quote-2]
+	return !unicode.IsLetter(previous) && !unicode.IsDigit(previous) && previous != '_' && previous != '$'
 }

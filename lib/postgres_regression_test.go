@@ -209,3 +209,20 @@ func TestPostgresCreatesEveryConfiguredSchemaBeforeMigrating(t *testing.T) {
 		t.Error("migration fell back to public")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestPostgresMigratesEscapedStringWithSemicolon
+// -----------------------------------------------------------------------------
+func TestPostgresMigratesEscapedStringWithSemicolon(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": `CREATE TABLE events(v text); INSERT INTO events VALUES(E'it\'s; valid'); INSERT INTO events VALUES('after');`})
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	if err := g.Connection.DB().QueryRow("SELECT string_agg(v,',' ORDER BY v) FROM events").Scan(&text); err != nil {
+		t.Fatal(err)
+	}
+	if text != "after,it's; valid" {
+		t.Errorf("unexpected data %q", text)
+	}
+}

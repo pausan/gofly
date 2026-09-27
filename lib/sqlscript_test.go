@@ -224,3 +224,14 @@ func TestSplitEmptyScript(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestSplitPostgresEscapeStringsWithoutChangingOrdinaryStrings
+// -----------------------------------------------------------------------------
+func TestSplitPostgresEscapeStringsWithoutChangingOrdinaryStrings(t *testing.T) {
+	for _, prefix := range []string{"E", "e"} {
+		literal := prefix + `'it\'s; valid'`
+		assertStatements(t, "SELECT "+literal+"; SELECT 2;", DialectPostgres, []string{"SELECT " + literal, "SELECT 2"})
+	}
+	assertStatements(t, `SELECT '\'; SELECT 2;`, DialectPostgres, []string{`SELECT '\'`, "SELECT 2"})
+}

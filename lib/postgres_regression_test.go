@@ -308,3 +308,99 @@ func TestPostgresCopyFailureRollsBackDDLAndData(t *testing.T) {
 		})
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestPostgresRunsNontransactionalMigrations
+// -----------------------------------------------------------------------------
+func TestPostgresRunsNontransactionalMigrations(t *testing.T) {
+	for _, statement := range []string{"CREATE INDEX CONCURRENTLY events_idx ON events(v);", "VACUUM events;"} {
+		t.Run(statement, func(t *testing.T) {
+			g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int);", "V2__online.sql": statement})
+			if _, err := g.Migrate(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := g.Migrate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresHonorsNontransactionalScriptConfiguration
+// -----------------------------------------------------------------------------
+func TestPostgresHonorsNontransactionalScriptConfiguration(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int); CREATE INDEX CONCURRENTLY events_idx ON events(v);", "V1__base.sql.conf": "executeInTransaction=false\n"})
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresMixedMigrationsRequireExplicitConsent
+// -----------------------------------------------------------------------------
+func TestPostgresMixedMigrationsRequireExplicitConsent(t *testing.T) {
+	for _, group := range []bool{false, true} {
+		t.Run(fmt.Sprint(group), func(t *testing.T) {
+			files := map[string]string{"V1__base.sql": "CREATE TABLE events(v int); CREATE INDEX CONCURRENTLY events_idx ON events(v);"}
+			if group {
+				files = map[string]string{"V1__base.sql": "CREATE TABLE events(v int);", "V2__online.sql": "CREATE INDEX CONCURRENTLY events_idx ON events(v);"}
+			}
+			g := newPostgresRegression(t, files)
+			g.Config.Group = group
+			if _, err := g.Migrate(); err == nil {
+				t.Fatal("mixed transaction modes were not rejected")
+			}
+			var exists bool
+			if err := g.Connection.DB().QueryRow("SELECT to_regclass('events') IS NOT NULL").Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if exists {
+				t.Fatal("mixed-mode rejection changed the database")
+			}
+			g.Config.Mixed = true
+			if _, err := g.Migrate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresRecordsFailuresOnlyWhenChangesCanRemain
+// -----------------------------------------------------------------------------
+func TestPostgresRecordsFailuresOnlyWhenChangesCanRemain(t *testing.T) {
+	for _, transactional := range []bool{false, true} {
+		t.Run(fmt.Sprint(transactional), func(t *testing.T) {
+			g := newPostgresRegression(t, map[string]string{
+				"V1__base.sql":      "CREATE TABLE events(v int PRIMARY KEY); INSERT INTO events VALUES(1); INSERT INTO events VALUES(1);",
+				"V1__base.sql.conf": fmt.Sprintf("executeInTransaction=%t\n", transactional),
+			})
+			if _, err := g.Migrate(); err == nil {
+				t.Fatal("duplicate data should fail")
+			}
+			rows, err := g.History.All()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if transactional && len(rows) != 0 {
+				t.Fatal("rolled back failure was recorded")
+			}
+			if !transactional && (len(rows) != 1 || rows[0].Success) {
+				t.Fatal("nontransactional failure was not recorded")
+			}
+			var exists bool
+			if err := g.Connection.DB().QueryRow("SELECT to_regclass('events') IS NOT NULL").Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if exists == transactional {
+				t.Fatalf("transactional=%v, remaining table=%v", transactional, exists)
+			}
+			if !transactional {
+				if _, err := g.Migrate(); err == nil {
+					t.Fatal("failed migration did not block retry")
+				}
+			}
+		})
+	}
+}

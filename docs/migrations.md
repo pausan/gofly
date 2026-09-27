@@ -177,3 +177,16 @@ PostgreSQL `COPY ... FROM STDIN` migrations accept inline text or CSV data endin
 with a standalone `\.` line. Payloads use the PostgreSQL COPY protocol on the
 migration connection, so they roll back with transactional migrations. A missing
 terminator is rejected before sending COPY to the server.
+
+PostgreSQL statements such as `CREATE INDEX CONCURRENTLY`, `DROP INDEX
+CONCURRENTLY`, `VACUUM`, and `REINDEX ... CONCURRENTLY` run outside a transaction.
+A migration's adjacent `<filename>.sql.conf` can override detection with
+`executeInTransaction=false` or `executeInTransaction=true`. Unknown script
+settings and malformed values are rejected.
+
+Mixing transactional and nontransactional statements in one script, or combining
+both kinds in a `--group=true` batch, requires `--mixed=true`. The entire script
+or group then runs without a transaction. A failed nontransactional migration is
+recorded as failed: inspect and repair partial changes before running `repair`.
+PostgreSQL transactional failures leave no failed history row because their
+changes rolled back. This also applies to undo scripts.

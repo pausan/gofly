@@ -21,10 +21,13 @@ type migrationTransaction struct {
 // -----------------------------------------------------------------------------
 // beginMigration
 // -----------------------------------------------------------------------------
-func (c *Connection) beginMigration() (*migrationTransaction, error) {
+func (c *Connection) beginMigration(transactional ...bool) (*migrationTransaction, error) {
 	conn, err := c.DB().Conn(context.Background())
 	if err != nil {
 		return nil, err
+	}
+	if len(transactional) > 0 && !transactional[0] {
+		return &migrationTransaction{conn: conn}, nil
 	}
 	tx, err := conn.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -38,6 +41,9 @@ func (c *Connection) beginMigration() (*migrationTransaction, error) {
 // Commit
 // -----------------------------------------------------------------------------
 func (m *migrationTransaction) Commit() error {
+	if m.Tx == nil {
+		return m.conn.Close()
+	}
 	return errors.Join(m.Tx.Commit(), m.conn.Close())
 }
 
@@ -45,6 +51,9 @@ func (m *migrationTransaction) Commit() error {
 // Rollback
 // -----------------------------------------------------------------------------
 func (m *migrationTransaction) Rollback() error {
+	if m.Tx == nil {
+		return m.conn.Close()
+	}
 	return errors.Join(m.Tx.Rollback(), m.conn.Close())
 }
 
@@ -56,4 +65,14 @@ func (m *migrationTransaction) copyFrom(statement, data string) error {
 		return fmt.Errorf("this build cannot execute PostgreSQL COPY")
 	}
 	return postgresCopyFrom(m.conn, statement, data)
+}
+
+// -----------------------------------------------------------------------------
+// Exec
+// -----------------------------------------------------------------------------
+func (m *migrationTransaction) Exec(query string, args ...any) (sql.Result, error) {
+	if m.Tx != nil {
+		return m.Tx.Exec(query, args...)
+	}
+	return m.conn.ExecContext(context.Background(), query, args...)
 }

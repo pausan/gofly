@@ -144,8 +144,6 @@ oversights:
   `ignoreMissingMigrations` and friends. gofly implements the older, blunter
   `--ignoreMissingMigrations` and `--ignoreFutureMigrations`, which cover what
   people actually use.
-- **`--mixed`** — accepted and ignored. gofly does not attempt to separate
-  transactional from non-transactional statements within one migration.
 - **`--cleanOnValidationError`** — depends on `clean`.
 - **`--errorOverrides`, `--batch`, `--outputQueryResults`, `--lockRetryCount`** —
   Teams features or tuning knobs for scale gofly is not aiming at.

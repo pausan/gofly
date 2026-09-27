@@ -22,6 +22,7 @@ type ResolvedMigration struct {
 	PhysicalLocation string
 	IsUndo           bool
 	IsRepeatable     bool
+	statements       []Statement
 }
 
 // -----------------------------------------------------------------------------

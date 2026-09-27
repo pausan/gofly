@@ -238,7 +238,7 @@ setting stays yours to make.
 | `--ignoreFutureMigrations` | `true` | Tolerate history rows newer than anything local |
 | `--installedBy` | the connecting user | What to record in `installed_by` |
 | `--skipExecutingMigrations` | `false` | Record migrations as applied without running them |
-| `--mixed` | `false` | Accepted for compatibility, has no effect |
+| `--mixed` | `false` | Allow transactional and nontransactional statements together, executing the script or group without a transaction |
 | `--cleanDisabled` | `true` | `clean` is not implemented either way |
 
 ### Schema history

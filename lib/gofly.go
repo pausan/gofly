@@ -449,7 +449,16 @@ func (g *Gofly) Migrate() (*MigrateResult, error) {
 func (g *Gofly) migrateGrouped(pending []*MigrationInfo, rank int, result *MigrateResult) error {
 	g.warnIfNoDDLTransactions()
 
-	transaction, err := g.Connection.beginMigration()
+	migrations := make([]*ResolvedMigration, 0, len(pending))
+	for _, info := range pending {
+		migrations = append(migrations, info.Resolved)
+	}
+	transactional, err := g.prepareGroup(migrations)
+	if err != nil {
+		return err
+	}
+
+	transaction, err := g.Connection.beginMigration(transactional)
 	if err != nil {
 		return err
 	}
@@ -460,7 +469,7 @@ func (g *Gofly) migrateGrouped(pending []*MigrationInfo, rank int, result *Migra
 		elapsed, err := g.executeMigration(transaction, migration)
 		if err != nil {
 			transaction.Rollback()
-			return g.migrationError(migration, err)
+			return errors.Join(g.migrationError(migration, err), g.recordFailure(migration, rank, elapsed, transactional))
 		}
 
 		applied := g.appliedRowFor(migration, rank, elapsed, true)
@@ -491,7 +500,11 @@ func (g *Gofly) migrateOneByOne(pending []*MigrationInfo, rank int, result *Migr
 	for _, info := range pending {
 		migration := info.Resolved
 
-		transaction, err := g.Connection.beginMigration()
+		transactional, err := g.prepareMigration(migration)
+		if err != nil {
+			return err
+		}
+		transaction, err := g.Connection.beginMigration(transactional)
 		if err != nil {
 			return err
 		}
@@ -500,7 +513,7 @@ func (g *Gofly) migrateOneByOne(pending []*MigrationInfo, rank int, result *Migr
 		if execErr != nil {
 			transaction.Rollback()
 
-			if err := g.recordFailure(migration, rank, elapsed); err != nil {
+			if err := g.recordFailure(migration, rank, elapsed, transactional); err != nil {
 				return errors.Join(g.migrationError(migration, execErr), err)
 			}
 
@@ -542,18 +555,13 @@ func (g *Gofly) executeMigration(executor sqlExecutor, migration *ResolvedMigrat
 	}
 	g.logf("Migrating schema %s to version %s", g.defaultSchema, label)
 
-	sql, err := migration.LoadSQL(g.Config.NewPlaceholderReplacer())
-	if err != nil {
-		return 0, err
-	}
-
 	started := time.Now()
 
 	if g.Config.SkipExecutingMigrations {
 		return 0, nil
 	}
 
-	for _, statement := range SplitStatements(sql, g.Connection.Dialect().Name()) {
+	for _, statement := range migration.statements {
 		var err error
 		if statement.ParseError != "" {
 			err = errors.New(statement.ParseError)
@@ -608,8 +616,8 @@ func (g *Gofly) appliedRowFor(migration *ResolvedMigration, rank int, elapsed in
 // implicitly, half the migration is still there and the row is the only record
 // of it.
 // -----------------------------------------------------------------------------
-func (g *Gofly) recordFailure(migration *ResolvedMigration, rank int, elapsed int) error {
-	if g.Connection.Dialect().SupportsDDLTransactions() {
+func (g *Gofly) recordFailure(migration *ResolvedMigration, rank int, elapsed int, transactional bool) error {
+	if transactional && g.Connection.Dialect().SupportsDDLTransactions() {
 		return nil
 	}
 
@@ -733,7 +741,16 @@ func (g *Gofly) Undo() (*UndoResult, error) {
 func (g *Gofly) undoGrouped(resolved *ResolvedMigrations, toUndo []*MigrationInfo, rank int, result *UndoResult) error {
 	g.warnIfNoDDLTransactions()
 
-	transaction, err := g.Connection.beginMigration()
+	migrations := make([]*ResolvedMigration, 0, len(toUndo))
+	for _, info := range toUndo {
+		migrations = append(migrations, resolved.UndoFor(info.Version()))
+	}
+	transactional, err := g.prepareGroup(migrations)
+	if err != nil {
+		return err
+	}
+
+	transaction, err := g.Connection.beginMigration(transactional)
 	if err != nil {
 		return err
 	}
@@ -744,7 +761,7 @@ func (g *Gofly) undoGrouped(resolved *ResolvedMigrations, toUndo []*MigrationInf
 		elapsed, err := g.executeMigration(transaction, undo)
 		if err != nil {
 			transaction.Rollback()
-			return g.migrationError(undo, err)
+			return errors.Join(g.migrationError(undo, err), g.recordFailure(undo, rank, elapsed, transactional))
 		}
 
 		if err := g.History.Insert(transaction, g.appliedRowFor(undo, rank, elapsed, true)); err != nil {
@@ -767,7 +784,11 @@ func (g *Gofly) undoOneByOne(resolved *ResolvedMigrations, toUndo []*MigrationIn
 	for _, info := range toUndo {
 		undo := resolved.UndoFor(info.Version())
 
-		transaction, err := g.Connection.beginMigration()
+		transactional, err := g.prepareMigration(undo)
+		if err != nil {
+			return err
+		}
+		transaction, err := g.Connection.beginMigration(transactional)
 		if err != nil {
 			return err
 		}
@@ -776,7 +797,7 @@ func (g *Gofly) undoOneByOne(resolved *ResolvedMigrations, toUndo []*MigrationIn
 		if execErr != nil {
 			transaction.Rollback()
 
-			if err := g.recordFailure(undo, rank, elapsed); err != nil {
+			if err := g.recordFailure(undo, rank, elapsed, transactional); err != nil {
 				return errors.Join(g.migrationError(undo, execErr), err)
 			}
 

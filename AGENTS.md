@@ -87,8 +87,8 @@ resolved schema before anything runs. There is a regression test for this in
 
 ### 5. Failures are only recorded where the DDL could not be rolled back
 
-`recordFailure` writes a failed row only when `SupportsDDLTransactions()` is
-false. This is Flyway's behaviour (`DbMigrate`, the `else` branch of
+`recordFailure` writes a failed row when the engine cannot roll back DDL or
+the migration explicitly/automatically executes outside a transaction. This is Flyway's behaviour (`DbMigrate`, the `else` branch of
 `supportsDdlTransactions()`), and the reasoning holds: if everything rolled
 back, there is nothing to repair, and a leftover failed row would block the next
 run over changes that no longer exist.

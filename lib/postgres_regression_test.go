@@ -16,7 +16,7 @@ import (
 // -----------------------------------------------------------------------------
 // newPostgresRegression
 // -----------------------------------------------------------------------------
-func newPostgresRegression(t *testing.T, files map[string]string) *Gofly {
+func newPostgresRegression(t *testing.T, files map[string]string, configure ...func(*Config)) *Gofly {
 	t.Helper()
 	raw := os.Getenv("GOFLY_TEST_PG_URL")
 	if raw == "" {
@@ -46,6 +46,9 @@ func newPostgresRegression(t *testing.T, files map[string]string) *Gofly {
 	config.URL, config.User, config.Password = u.String(), user, password
 	config.Quiet = true
 	config.Locations = []string{writeFilesInDir(t, files)}
+	for _, change := range configure {
+		change(config)
+	}
 	g, err := New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -170,5 +173,39 @@ func TestPostgresBaselineOnMigrateAppliesV1ToEmptyDatabase(t *testing.T) {
 	}
 	if result.MigrationsExecuted != 2 {
 		t.Errorf("executed %d migrations, want 2", result.MigrationsExecuted)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresCreatesEveryConfiguredSchemaBeforeMigrating
+// -----------------------------------------------------------------------------
+func TestPostgresCreatesEveryConfiguredSchemaBeforeMigrating(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int); CREATE TABLE extra.other(v int);"}, func(c *Config) { c.Schemas = []string{"tenant", "extra"} })
+	if _, err := g.Info(); err != nil {
+		t.Fatal(err)
+	}
+	var exists bool
+	if err := g.Connection.DB().QueryRow("SELECT to_regnamespace('tenant') IS NOT NULL").Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("read-only preflight created application schemas")
+	}
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"tenant.events", "extra.other"} {
+		if err := g.Connection.DB().QueryRow("SELECT to_regclass($1) IS NOT NULL", name).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if !exists {
+			t.Errorf("missing %s", name)
+		}
+	}
+	if err := g.Connection.DB().QueryRow("SELECT to_regclass('public.events') IS NOT NULL").Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Error("migration fell back to public")
 	}
 }

@@ -248,7 +248,7 @@ setting stays yours to make.
 | `--goflyTable` | `gofly_schema_history` | Name of gofly's history table |
 | `--goflySchema` | `gofly` on PostgreSQL and SQL Server, none elsewhere | Schema holding it |
 | `--defaultSchema` | the connection's own | Schema the migrations run against |
-| `--schemas` | — | Comma separated; the first is the default schema |
+| `--schemas` | — | Comma separated application schemas, created before mutation; the first is the default schema |
 | `--flywayTable` | `flyway_schema_history` | The table to import from and validate against |
 | `--importFromFlyway` | `true` | Import an existing Flyway history on the first run |
 

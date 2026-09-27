@@ -111,6 +111,9 @@ func (g *Gofly) Close() error {
 // history and the checksums carry on where Flyway stopped.
 // -----------------------------------------------------------------------------
 func (g *Gofly) EnsureHistory() error {
+	if err := g.ensureApplicationSchemas(); err != nil {
+		return err
+	}
 	exists, err := g.History.Exists()
 	if err != nil {
 		return err

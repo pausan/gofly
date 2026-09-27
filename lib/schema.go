@@ -101,3 +101,31 @@ func (g *Gofly) checkUnmanagedSchema() error {
 	}
 	return nil
 }
+
+// -----------------------------------------------------------------------------
+// ensureApplicationSchemas
+//
+// PostgreSQL silently ignores nonexistent search_path entries. Create every
+// requested schema before any migration can fall through into public.
+// -----------------------------------------------------------------------------
+func (g *Gofly) ensureApplicationSchemas() error {
+	dialect := g.Connection.Dialect()
+	if !dialect.SupportsSchemas() {
+		return nil
+	}
+	for _, schema := range g.applicationSchemas() {
+		exists, err := dialect.SchemaExists(g.Connection.DB(), schema)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		for _, statement := range dialect.CreateSchemaSQL(schema) {
+			if _, err := g.Connection.DB().Exec(statement); err != nil {
+				return fmt.Errorf("cannot create application schema %s: %w", schema, err)
+			}
+		}
+	}
+	return dialect.SetSessionSchema(g.Connection.DB(), g.defaultSchema)
+}

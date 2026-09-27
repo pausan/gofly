@@ -11,6 +11,7 @@ package lib
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -98,6 +99,88 @@ func (h *SchemaHistory) Create() error {
 	}
 
 	return nil
+}
+
+// -----------------------------------------------------------------------------
+// CreateAndImport
+//
+// A history table is the marker that takeover completed. On transactional DDL
+// engines it must become visible in the same commit as the imported rows.
+// -----------------------------------------------------------------------------
+func (h *SchemaHistory) CreateAndImport(sourceSchema, sourceTable string, importHistory bool) (int, error) {
+	dialect := h.connection.Dialect()
+	db := h.connection.DB()
+	statements := []string{}
+	if h.schema != "" && dialect.SupportsSchemas() {
+		exists, err := dialect.SchemaExists(db, h.schema)
+		if err != nil {
+			return 0, err
+		}
+		if !exists {
+			statements = append(statements, dialect.CreateSchemaSQL(h.schema)...)
+		}
+	}
+	statements = append(statements, dialect.CreateHistoryTableSQL(h.schema, h.table)...)
+	copySQL := ""
+	if importHistory {
+		exists, err := dialect.TableExists(db, sourceSchema, sourceTable)
+		if err != nil {
+			return 0, err
+		}
+		if exists {
+			copySQL = h.importSQL(sourceSchema, sourceTable)
+		}
+	}
+	if !dialect.SupportsDDLTransactions() {
+		if err := h.Create(); err != nil {
+			return 0, err
+		}
+		if copySQL == "" {
+			return 0, nil
+		}
+		result, err := db.Exec(copySQL)
+		if err != nil {
+			// MySQL cannot roll DDL back, but a failed copy must not leave a
+			// completed-takeover marker. INSERT SELECT itself is atomic.
+			_, cleanupErr := db.Exec("DROP TABLE " + h.QualifiedName())
+			return 0, errors.Join(err, cleanupErr)
+		}
+		count, err := result.RowsAffected()
+		return int(count), err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return 0, err
+		}
+	}
+	count := int64(0)
+	if copySQL != "" {
+		result, err := tx.Exec(copySQL)
+		if err != nil {
+			return 0, fmt.Errorf("cannot import the Flyway schema history: %w", err)
+		}
+		count, err = result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// -----------------------------------------------------------------------------
+// importSQL
+// -----------------------------------------------------------------------------
+func (h *SchemaHistory) importSQL(schema, table string) string {
+	source := h.connection.Dialect().QuoteIdentifier(schema, table)
+	return h.rewriteQuotes("INSERT INTO " + h.QualifiedName() + " (" + h.columnList() + ") SELECT " + h.columnList() + " FROM " + source)
 }
 
 // -----------------------------------------------------------------------------
@@ -271,7 +354,7 @@ func (h *SchemaHistory) ImportFromFlyway(flywaySchema string, flywayTable string
 	// the migration that follows leaves the original history untouched
 	// Copy inside the database so timestamps retain their original value and
 	// precision instead of being replaced by the destination's DEFAULT now().
-	query := h.rewriteQuotes("INSERT INTO " + h.QualifiedName() + " (" + h.columnList() + ") SELECT " + h.columnList() + " FROM " + source)
+	query := h.importSQL(flywaySchema, flywayTable)
 	result, err := db.Exec(query)
 	if err != nil {
 		return 0, fmt.Errorf("cannot import the flyway schema history %s: %w", source, err)

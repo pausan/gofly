@@ -85,6 +85,10 @@ first run gofly:
    `installed_by`, execution times and all;
 3. carries on from there.
 
+On PostgreSQL, SQLite and SQL Server, creating the new history and importing
+its rows commit together. If the import fails, retry imports the original
+history again instead of replaying its migrations.
+
 `flyway_schema_history` is only ever read. It is never written to and never
 dropped, so going back to Flyway remains possible. `--importFromFlyway=false`
 skips the import.

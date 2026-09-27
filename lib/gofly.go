@@ -119,19 +119,11 @@ func (g *Gofly) EnsureHistory() error {
 		return nil
 	}
 
-	if err := g.History.Create(); err != nil {
-		return err
-	}
-	g.logf("Created schema history table: %s", g.History.QualifiedName())
-
-	if !g.Config.ImportFromFlyway {
-		return nil
-	}
-
-	imported, err := g.History.ImportFromFlyway(g.defaultSchema, g.Config.FlywayTable)
+	imported, err := g.History.CreateAndImport(g.defaultSchema, g.Config.FlywayTable, g.Config.ImportFromFlyway)
 	if err != nil {
 		return err
 	}
+	g.logf("Created schema history table: %s", g.History.QualifiedName())
 	if imported > 0 {
 		g.logf("Imported %d row(s) from the existing %s table into %s",
 			imported, g.Config.FlywayTable, g.History.QualifiedName())

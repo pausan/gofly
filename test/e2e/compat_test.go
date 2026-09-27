@@ -15,6 +15,7 @@
 package e2e
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -566,44 +567,58 @@ func TestCompatFlywayCanReadWhatGoflyWrote(t *testing.T) {
 // TestCompatValidateAgainstAnUntouchedFlywayDatabase
 //
 // Validating a database still managed by Flyway must read the Flyway history
-// and must not create anything.
+// and must not create anything. By default that table is the one gofly shares;
+// with reuseFlywayHistory=false it is read until gofly imports it.
 // -----------------------------------------------------------------------------
 func TestCompatValidateAgainstAnUntouchedFlywayDatabase(t *testing.T) {
 	eachComparableTarget(t, func(t *testing.T, target Target) {
-		workspace := NewWorkspace(t, target)
-		workspace.WriteAll(baseSchema(target.SQLDialect))
-		workspace.MustRunFlyway("migrate")
-
-		gofly := workspace.Gofly(nil)
-
-		info, source, err := gofly.InfoWithSource()
-		if err != nil {
-			t.Fatalf("gofly info failed: %v", err)
-		}
-		if source != lib.HistorySourceFlyway {
-			t.Fatalf("gofly read source %v, want the flyway history", source)
-		}
-		if info.Current.String() != "3" {
-			t.Errorf("gofly reports version %s, want 3", info.Current)
-		}
-
-		result, err := gofly.Validate()
-		if err != nil {
-			t.Fatalf("gofly validate failed: %v", err)
-		}
-		if !result.Valid() {
-			t.Errorf("validation should pass against the flyway history: %v", result.Error())
-		}
-
-		exists, err := gofly.Connection.Dialect().TableExists(
-			gofly.Connection.DB(), historySchemaFor(target), lib.DefaultGoflyTable)
-		if err != nil {
-			t.Fatalf("cannot look up the gofly table: %v", err)
-		}
-		if exists {
-			t.Error("validate created the gofly history table, it must not")
+		for reuse, want := range map[bool]lib.HistorySource{true: lib.HistorySourceShared, false: lib.HistorySourceFlyway} {
+			t.Run(fmt.Sprintf("reuse=%t", reuse), func(t *testing.T) {
+				validateUntouchedFlywayDatabase(t, target, reuse, want)
+			})
 		}
 	})
+}
+
+// -----------------------------------------------------------------------------
+// validateUntouchedFlywayDatabase
+// -----------------------------------------------------------------------------
+func validateUntouchedFlywayDatabase(t *testing.T, target Target, reuse bool, want lib.HistorySource) {
+	workspace := NewWorkspace(t, target)
+	workspace.WriteAll(baseSchema(target.SQLDialect))
+	workspace.MustRunFlyway("migrate")
+
+	config := workspace.Config()
+	config.ReuseFlywayHistory = reuse
+	gofly := workspace.Gofly(config)
+
+	info, source, err := gofly.InfoWithSource()
+	if err != nil {
+		t.Fatalf("gofly info failed: %v", err)
+	}
+	if source != want {
+		t.Fatalf("gofly read source %v, want %v", source, want)
+	}
+	if info.Current.String() != "3" {
+		t.Errorf("gofly reports version %s, want 3", info.Current)
+	}
+
+	result, err := gofly.Validate()
+	if err != nil {
+		t.Fatalf("gofly validate failed: %v", err)
+	}
+	if !result.Valid() {
+		t.Errorf("validation should pass against the flyway history: %v", result.Error())
+	}
+
+	exists, err := gofly.Connection.Dialect().TableExists(
+		gofly.Connection.DB(), historySchemaFor(target), lib.DefaultGoflyTable)
+	if err != nil {
+		t.Fatalf("cannot look up the gofly table: %v", err)
+	}
+	if exists {
+		t.Error("validate created the gofly history table, it must not")
+	}
 }
 
 // -----------------------------------------------------------------------------

@@ -41,8 +41,10 @@ docs/                cli, configuration, migrations, compatibility
 ## Shared history and PostgreSQL operations
 
 Existing Flyway history is reused by default. The separate-history import is
-explicit (`reuseFlywayHistory=false`); its source remains read-only. Refuse
-ambiguous dual histories rather than choosing stale state. PostgreSQL mutation
+explicit (`reuseFlywayHistory=false`); its source remains read-only. A Flyway
+table whose rows are all in gofly's table is the stale copy an earlier import
+left, and gofly keeps its own; refuse any other dual histories rather than
+choosing stale state. PostgreSQL mutation
 locks must cover history selection, validation, SQL and history updates on one
 pinned physical connection, and use Flyway-compatible advisory lock keys.
 
@@ -90,7 +92,9 @@ land in the history schema.
 
 `postgresDialect.DefaultSchema` therefore walks `current_schemas(false)` and
 skips the history schema, and `NewWithConnection` pins a physical PostgreSQL connection and its search path
-before anything runs. Migration SQL, history writes, COPY and advisory locks
+before anything runs. MySQL's `USE` is per connection too, so MySQL gets a pinned
+session as well; a schema that does not exist yet is switched to once migrate
+has created it. Migration SQL, history writes, COPY and advisory locks
 must use that session; the public DB() pool is for independent queries. There is a regression test for this in
 `lib/integration_test.go`; it cannot be reproduced on SQLite.
 

@@ -74,6 +74,11 @@ different Flyway version, which is how you check gofly against a newer release.
 | PostgreSQL E-strings, COPY FROM STDIN, concurrent indexes, VACUUM | yes |
 | nontransactional per-script configuration | yes |
 | baselineOnMigrate on an empty database | yes |
+| a non-empty schema refused, with the same message, per database | yes |
+| PostgreSQL extension objects leave a schema empty | yes |
+| schema creation and its `SCHEMA` row (PostgreSQL, MySQL, SQL Server) | yes |
+| nontransactional statements: mixed scripts refused, failures recorded (all but MySQL) | yes |
+| upgrading from an earlier separate-history takeover | gofly only, Flyway has no such state |
 | Flyway reading the history gofly wrote | yes |
 | validate against a database still managed by Flyway | yes |
 | undo, and re-applying afterwards | gofly only, undo is a Teams feature |

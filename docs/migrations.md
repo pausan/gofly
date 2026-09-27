@@ -178,8 +178,21 @@ with a standalone `\.` line. Payloads use the PostgreSQL COPY protocol on the
 migration connection, so they roll back with transactional migrations. A missing
 terminator is rejected before sending COPY to the server.
 
-PostgreSQL statements such as `CREATE INDEX CONCURRENTLY`, `DROP INDEX
-CONCURRENTLY`, `VACUUM`, and `REINDEX ... CONCURRENTLY` run outside a transaction.
+Some statements run outside a transaction, detected with the rules of Flyway's
+parser for each database, which look at a statement's first ten keywords:
+
+- PostgreSQL: `CREATE`/`DROP DATABASE`, `TABLESPACE` or `SUBSCRIPTION`,
+  `ALTER SYSTEM`, `CREATE`/`DROP [UNIQUE] INDEX CONCURRENTLY`,
+  `REINDEX SCHEMA`/`DATABASE`/`SYSTEM`, `VACUUM`, `DISCARD ALL`, and
+  `ALTER TYPE ... ADD VALUE` before PostgreSQL 12. gofly also runs
+  `REINDEX INDEX`/`TABLE CONCURRENTLY` outside a transaction, which PostgreSQL
+  requires and Flyway does not do.
+- SQL Server: `BACKUP`, `RESTORE`, `RECONFIGURE`, `CREATE`/`ALTER`/`DROP DATABASE`
+  or `FULLTEXT`, and `EXEC` of replication and linked server procedures such as
+  `sp_addlinkedserver`.
+- SQLite: `PRAGMA foreign_keys`, which does nothing inside a transaction.
+- MySQL and MariaDB: none, since DDL commits implicitly anyway.
+
 A migration's adjacent `<filename>.sql.conf` can override detection with
 `executeInTransaction=false` or `executeInTransaction=true`. Unknown script
 settings and malformed values are rejected.
@@ -188,5 +201,5 @@ Mixing transactional and nontransactional statements in one script, or combining
 both kinds in a `--group=true` batch, requires `--mixed=true`. The entire script
 or group then runs without a transaction. A failed nontransactional migration is
 recorded as failed: inspect and repair partial changes before running `repair`.
-PostgreSQL transactional failures leave no failed history row because their
-changes rolled back. This also applies to undo scripts.
+Transactional failures on PostgreSQL, SQL Server and SQLite leave no failed
+history row because their changes rolled back. This also applies to undo scripts.

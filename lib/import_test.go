@@ -13,10 +13,21 @@ import (
 // createFlywayHistory
 //
 // Builds a flyway_schema_history table exactly as Flyway would leave it, and
-// fills it with the given rows.
+// fills it with the given rows, for gofly to import into a separate history.
 // -----------------------------------------------------------------------------
 func (s *testSetup) createFlywayHistory(rows []string) {
+	s.t.Helper()
+
 	s.config.ReuseFlywayHistory = false
+	s.seedFlywayHistory(rows)
+}
+
+// -----------------------------------------------------------------------------
+// seedFlywayHistory
+//
+// Same as createFlywayHistory, leaving gofly's default of sharing that table.
+// -----------------------------------------------------------------------------
+func (s *testSetup) seedFlywayHistory(rows []string) {
 	s.t.Helper()
 
 	db, err := sql.Open("sqlite", s.dbPath)

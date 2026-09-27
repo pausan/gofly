@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -672,5 +673,59 @@ func TestPostgresSessionLossAbortsRatherThanReconnectingWithoutALock(t *testing.
 	}
 	if rows != 1 {
 		t.Fatalf("retry left %d rows", rows)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresObjectsOwnedByAnExtensionLeaveTheSchemaEmpty
+//
+// Flyway's PostgreSQLSchema.doEmpty skips extension objects, so a database
+// that only has pgcrypto or PostGIS installed is migrated, not refused.
+// -----------------------------------------------------------------------------
+func TestPostgresObjectsOwnedByAnExtensionLeaveTheSchemaEmpty(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int);"})
+	regressionExec(t, g, "CREATE EXTENSION pgcrypto")
+	if _, err := g.Migrate(); err != nil {
+		t.Fatalf("an extension alone must not make the schema non-empty: %v", err)
+	}
+
+	peer := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int);"})
+	regressionExec(t, peer, "CREATE TYPE mood AS ENUM ('ok')")
+	if _, err := peer.Migrate(); err == nil || !strings.Contains(err.Error(), `Found non-empty schema(s) "public"`) {
+		t.Fatalf("a user type makes the schema non-empty, got %v", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresRecordsTheSchemaCreationMarker
+//
+// Flyway writes a SCHEMA row at rank 0 for the schemas it created, which also
+// must not stop a later baseline.
+// -----------------------------------------------------------------------------
+func TestPostgresRecordsTheSchemaCreationMarker(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V2__next.sql": "CREATE TABLE events(v int);"}, func(c *Config) {
+		c.Schemas = []string{"tenant", "extra"}
+		c.BaselineVersion = "1"
+	})
+	if err := g.Baseline(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := g.History.All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected marker, baseline and V2, got %d row(s)", len(rows))
+	}
+	marker := rows[0]
+	if marker.InstalledRank != 0 || marker.Type != MigrationTypeSchema || marker.Version != nil ||
+		marker.Description != "<< Flyway Schema Creation >>" || marker.Script != `"tenant","extra"` {
+		t.Errorf("unexpected marker %+v", marker)
+	}
+	if rows[1].Type != MigrationTypeBaseline || rows[1].InstalledRank != 1 {
+		t.Errorf("the baseline must follow the marker at rank 1, got %+v", rows[1])
 	}
 }

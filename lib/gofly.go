@@ -23,6 +23,9 @@ type Gofly struct {
 	History     *SchemaHistory
 	Output      io.Writer
 
+	// serverVersion is PostgreSQL's server_version_num, read when first needed
+	serverVersion int
+
 	// historySchema is where the gofly history table lives, resolved once
 	historySchema string
 
@@ -84,9 +87,17 @@ func NewWithConnection(config *Config, connection *Connection) (*Gofly, error) {
 	}
 
 	// pin the session to it, so that a migration saying CREATE TABLE with no
-	// schema always lands in the same place, run after run
-	if err := dialect.SetSessionSchema(connection.sessionDB(), defaultSchema); err != nil {
+	// schema always lands in the same place, run after run. A schema that is
+	// not there yet is switched to once migrate creates it: MySQL cannot USE
+	// a database that does not exist.
+	exists, err := dialect.SchemaExists(connection.sessionDB(), defaultSchema)
+	if err != nil {
 		return nil, err
+	}
+	if exists {
+		if err := dialect.SetSessionSchema(connection.sessionDB(), defaultSchema); err != nil {
+			return nil, err
+		}
 	}
 
 	gofly := &Gofly{
@@ -116,7 +127,8 @@ func (g *Gofly) Close() error {
 // history and the checksums carry on where Flyway stopped.
 // -----------------------------------------------------------------------------
 func (g *Gofly) ensureHistory() error {
-	if err := g.ensureApplicationSchemas(); err != nil {
+	created, err := g.ensureApplicationSchemas()
+	if err != nil {
 		return err
 	}
 	exists, err := g.History.Exists()
@@ -135,6 +147,13 @@ func (g *Gofly) ensureHistory() error {
 	if imported > 0 {
 		g.logf("Imported %d row(s) from the existing %s table into %s",
 			imported, g.Config.FlywayTable, g.History.QualifiedName())
+		return nil
+	}
+
+	// Flyway only creates schemas together with a new history table, and
+	// records that it did so at rank 0
+	if len(created) > 0 {
+		return g.History.Insert(g.Connection.sessionDB(), g.schemaMarker(created))
 	}
 
 	return nil
@@ -153,6 +172,10 @@ const (
 	// HistorySourceFlyway means gofly has no table here yet and the existing
 	// Flyway one was read instead, without touching it
 	HistorySourceFlyway
+
+	// HistorySourceShared means the Flyway table was read because gofly uses
+	// it as its own history
+	HistorySourceShared
 )
 
 // -----------------------------------------------------------------------------
@@ -195,12 +218,24 @@ func (g *Gofly) InfoWithSource() (*MigrationInfoService, HistorySource, error) {
 //
 // Reads the schema history without creating anything.
 //
-// Once gofly owns a database its own table is the only truth. Before that, an
-// existing flyway_schema_history is read as is, so that `validate` on a
+// A shared Flyway table, or gofly's own table, is the only truth. With
+// reuseFlywayHistory=false and no import yet, an existing
+// flyway_schema_history is read as is, so that `validate` on a
 // database still managed by Flyway checks the migrations against the history
 // that is actually there rather than reporting every one of them as pending.
 // -----------------------------------------------------------------------------
 func (g *Gofly) readHistory() ([]*AppliedMigration, HistorySource, error) {
+	// the same choice migrate makes, so that info cannot show one history while
+	// migrate refuses to pick between two
+	shared, _, err := g.sharedHistory()
+	if err != nil {
+		return nil, HistorySourceNone, err
+	}
+	if shared != nil {
+		applied, err := shared.All()
+		return applied, HistorySourceShared, err
+	}
+
 	exists, err := g.History.Exists()
 	if err != nil {
 		return nil, HistorySourceNone, err
@@ -285,7 +320,7 @@ func (g *Gofly) logValidationDetail(info *MigrationInfoService, source HistorySo
 	}
 
 	table := g.History.QualifiedName()
-	if source == HistorySourceFlyway {
+	if source == HistorySourceFlyway || source == HistorySourceShared {
 		table = g.Config.FlywayTable
 	}
 
@@ -847,6 +882,7 @@ func (g *Gofly) baseline() error {
 	if err != nil {
 		return err
 	}
+	applied = withoutSchemaMarker(applied)
 	for _, migration := range applied {
 		if migration.Type == MigrationTypeBaseline {
 			g.logf("Schema history table %s already contains a baseline, skipping",
@@ -906,7 +942,7 @@ func (g *Gofly) baselineOnMigrate() error {
 	if err != nil {
 		return err
 	}
-	if len(applied) > 0 {
+	if len(withoutSchemaMarker(applied)) > 0 {
 		return nil
 	}
 

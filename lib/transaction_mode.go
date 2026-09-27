@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -15,7 +16,7 @@ import (
 // prepareMigration
 //
 // Keep the parsed statements so classification and execution use identical SQL.
-// A script override takes precedence over PostgreSQL's automatic detection.
+// A script override takes precedence over the automatic detection.
 // -----------------------------------------------------------------------------
 func (g *Gofly) prepareMigration(m *ResolvedMigration) (bool, error) {
 	text, err := m.LoadSQL(g.Config.NewPlaceholderReplacer())
@@ -28,10 +29,16 @@ func (g *Gofly) prepareMigration(m *ResolvedMigration) (bool, error) {
 		if s.ParseError != "" {
 			return false, fmt.Errorf("%s: %s", m.Script, s.ParseError)
 		}
-		if g.Connection.Dialect().Name() == DialectPostgres && postgresNontransactional(s.SQL) {
-			nontransactional = true
-		} else {
+	}
+	for _, unit := range detectionUnits(m.statements, g.Connection.Dialect().Name()) {
+		inTransaction, err := g.canExecuteInTransaction(unit)
+		if err != nil {
+			return false, err
+		}
+		if inTransaction {
 			transactional = true
+		} else {
+			nontransactional = true
 		}
 	}
 	override, err := scriptTransactionOverride(m.PhysicalLocation + ".conf")
@@ -45,6 +52,26 @@ func (g *Gofly) prepareMigration(m *ResolvedMigration) (bool, error) {
 		return false, fmt.Errorf("%s mixes transactional and non-transactional statements; set mixed=true or executeInTransaction=false for this script", m.Script)
 	}
 	return !nontransactional, nil
+}
+
+// -----------------------------------------------------------------------------
+// detectionUnits
+//
+// What Flyway calls a statement when it decides on a transaction: each
+// statement, except on SQL Server, where it is the whole GO batch. A batch
+// holding one nontransactional statement then runs entirely outside a
+// transaction, as it does with Flyway, instead of being refused as mixed.
+// -----------------------------------------------------------------------------
+func detectionUnits(statements []Statement, dialect string) []string {
+	units := []string{}
+	for index, statement := range statements {
+		if dialect == DialectMssql && index > 0 && statements[index-1].Batch == statement.Batch {
+			units[len(units)-1] += ";\n" + statement.SQL
+			continue
+		}
+		units = append(units, statement.SQL)
+	}
+	return units
 }
 
 // -----------------------------------------------------------------------------
@@ -101,37 +128,108 @@ func scriptTransactionOverride(path string) (*bool, error) {
 	return result, scanner.Err()
 }
 
+// Flyway's PostgreSQLParser rules. Each is matched against the leading keywords
+// one at a time, the first one, then the first two and so on, which is how
+// Flyway's parser feeds them in.
+var postgresNontransactionalRules = []*regexp.Regexp{
+	regexp.MustCompile(`^(CREATE|DROP) (DATABASE|TABLESPACE|SUBSCRIPTION)$`),
+	regexp.MustCompile(`^ALTER SYSTEM$`),
+	regexp.MustCompile(`^(CREATE|DROP)( UNIQUE)? INDEX CONCURRENTLY$`),
+	regexp.MustCompile(`^REINDEX( VERBOSE)? (SCHEMA|DATABASE|SYSTEM)$`),
+	regexp.MustCompile(`^VACUUM$`),
+	regexp.MustCompile(`^DISCARD ALL$`),
+
+	// not in Flyway, which sends this inside a transaction for PostgreSQL to
+	// refuse. Running it where it can succeed changes no history Flyway could
+	// have written.
+	regexp.MustCompile(`^REINDEX( VERBOSE)? (INDEX|TABLE) CONCURRENTLY$`),
+}
+
+// ALTER TYPE ... ADD VALUE only became transactional in PostgreSQL 12
+var postgresAddEnumValue = regexp.MustCompile(`^ALTER TYPE( .*)? ADD VALUE$`)
+
+// SQLServerParser.SPROCS_INVALID_IN_TRANSACTIONS
+var mssqlProceduresOutsideTransactions = map[string]bool{
+	"SP_ADDSUBSCRIPTION": true, "SP_DROPSUBSCRIPTION": true,
+	"SP_ADDDISTRIBUTOR": true, "SP_DROPDISTRIBUTOR": true,
+	"SP_ADDDISTPUBLISHER": true, "SP_DROPDISTPUBLISHER": true,
+	"SP_ADDLINKEDSERVER": true, "SP_DROPLINKEDSERVER": true,
+	"SP_ADDLINKEDSRVLOGIN": true, "SP_DROPLINKEDSRVLOGIN": true,
+	"SP_SERVEROPTION": true, "SP_REPLICATIONDBOPTION": true,
+	"SP_FULLTEXT_DATABASE": true,
+}
+
 // -----------------------------------------------------------------------------
-// postgresNontransactional
+// canExecuteInTransaction
 //
-// Match statement keywords, never literals, comments or quoted identifiers.
-// ALTER TYPE ADD VALUE is transactional on PostgreSQL 12 and newer.
+// Mirrors each Flyway parser's detectCanExecuteInTransaction. MySQL has no
+// rules: it cannot roll DDL back anyway.
 // -----------------------------------------------------------------------------
-func postgresNontransactional(statement string) bool {
-	words := postgresKeywords(statement)
-	if len(words) == 0 {
-		return false
+func (g *Gofly) canExecuteInTransaction(statement string) (bool, error) {
+	dialect := g.Connection.Dialect().Name()
+	words := flywayKeywords(statement, dialect)
+	if nontransactionalKeywords(dialect, words) {
+		return false, nil
 	}
-	switch words[0] {
-	case "VACUUM", "DISCARD":
-		return true
-	case "CREATE", "DROP":
-		if len(words) > 1 && (words[1] == "DATABASE" || words[1] == "TABLESPACE") {
-			return true
+	if dialect != DialectPostgres || !matchesAnyPrefix(postgresAddEnumValue, words) {
+		return true, nil
+	}
+
+	if g.serverVersion == 0 {
+		err := g.Connection.sessionDB().QueryRow(`SELECT current_setting('server_version_num')::int`).Scan(&g.serverVersion)
+		if err != nil {
+			return false, err
 		}
-		i := 1
-		if i < len(words) && words[i] == "UNIQUE" {
-			i++
-		}
-		return i+1 < len(words) && words[i] == "INDEX" && words[i+1] == "CONCURRENTLY"
-	case "REINDEX":
-		for _, word := range words[1:] {
-			if word == "CONCURRENTLY" || word == "DATABASE" || word == "SYSTEM" || word == "SCHEMA" {
+	}
+	return g.serverVersion >= 120000, nil
+}
+
+// -----------------------------------------------------------------------------
+// nontransactionalKeywords
+// -----------------------------------------------------------------------------
+func nontransactionalKeywords(dialect string, words []string) bool {
+	switch dialect {
+	case DialectPostgres:
+		for _, rule := range postgresNontransactionalRules {
+			if matchesAnyPrefix(rule, words) {
 				return true
 			}
 		}
-	case "ALTER":
-		return len(words) > 1 && words[1] == "SYSTEM"
+
+	case DialectMssql:
+		for i, current := range words {
+			if current == "BACKUP" || current == "RESTORE" || current == "RECONFIGURE" {
+				return true
+			}
+			if i == 0 {
+				continue
+			}
+			previous := words[i-1]
+			if previous == "EXEC" && mssqlProceduresOutsideTransactions[current] {
+				return true
+			}
+			if (previous == "CREATE" || previous == "ALTER" || previous == "DROP") &&
+				(current == "DATABASE" || current == "FULLTEXT") {
+				return true
+			}
+		}
+
+	case DialectSqlite:
+		// PRAGMA foreign_keys is silently ignored inside a transaction
+		return len(words) > 1 && words[0] == "PRAGMA" && words[1] == "FOREIGN_KEYS"
+	}
+
+	return false
+}
+
+// -----------------------------------------------------------------------------
+// matchesAnyPrefix
+// -----------------------------------------------------------------------------
+func matchesAnyPrefix(rule *regexp.Regexp, words []string) bool {
+	for i := 1; i <= len(words); i++ {
+		if rule.MatchString(strings.Join(words[:i], " ")) {
+			return true
+		}
 	}
 	return false
 }

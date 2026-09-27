@@ -213,11 +213,34 @@ func (w *Workspace) Reset() {
 }
 
 // -----------------------------------------------------------------------------
+// Exec
+//
+// Runs a statement against the workspace database outside of any migration,
+// to set up what a scenario expects to find.
+// -----------------------------------------------------------------------------
+func (w *Workspace) Exec(statement string) {
+	w.t.Helper()
+
+	connection, err := lib.Connect(w.url, w.target.User, w.target.Password, 0)
+	if err != nil {
+		w.t.Fatalf("cannot connect to %s: %v", w.target.Name, err)
+	}
+	defer connection.Close()
+
+	if _, err := connection.DB().Exec(statement); err != nil {
+		w.t.Fatalf("cannot run %q on %s: %v", statement, w.target.Name, err)
+	}
+}
+
+// appSchema is the application schema scenarios ask both tools to create
+const appSchema = "e2e_app"
+
+// -----------------------------------------------------------------------------
 // resetStatements
 //
 // Drops everything the harness might have created. Each scenario only ever uses
-// the e2e_* tables plus the two history tables, so a targeted drop is enough and
-// leaves anything else in the database alone.
+// e2e_* objects, the e2e_app schema and the two history tables, so a targeted
+// drop is enough and leaves anything else in the database alone.
 // -----------------------------------------------------------------------------
 func resetStatements(dialect string) []string {
 	tables := []string{
@@ -235,10 +258,19 @@ func resetStatements(dialect string) []string {
 			statements = append(statements, `DROP TABLE IF EXISTS "`+table+`" CASCADE`)
 		}
 		statements = append(statements, `DROP VIEW IF EXISTS "e2e_user_names" CASCADE`)
+		statements = append(statements,
+			"DROP SCHEMA IF EXISTS "+appSchema+" CASCADE",
+			"DROP TYPE IF EXISTS e2e_mood",
+			"DROP EXTENSION IF EXISTS pgcrypto",
+		)
 
 	case lib.DialectMysql:
 		statements = append(statements, "DROP DATABASE IF EXISTS `"+lib.DefaultGoflySchema+"`")
 		statements = append(statements, "DROP VIEW IF EXISTS `e2e_user_names`")
+		statements = append(statements,
+			"DROP DATABASE IF EXISTS `"+appSchema+"`",
+			"DROP PROCEDURE IF EXISTS `e2e_proc`",
+		)
 		for _, table := range tables {
 			statements = append(statements, "DROP TABLE IF EXISTS `"+table+"`")
 		}
@@ -249,7 +281,14 @@ func resetStatements(dialect string) []string {
 				` DROP TABLE [`+lib.DefaultGoflySchema+`].[`+lib.DefaultGoflyTable+`]`,
 			`IF SCHEMA_ID('`+lib.DefaultGoflySchema+`') IS NOT NULL EXEC('DROP SCHEMA [`+lib.DefaultGoflySchema+`]')`,
 			`IF OBJECT_ID('[e2e_user_names]', 'V') IS NOT NULL DROP VIEW [e2e_user_names]`,
+			`DROP TYPE IF EXISTS [e2e_code]`,
 		)
+		for _, table := range tables {
+			statements = append(statements,
+				`IF OBJECT_ID('[`+appSchema+`].[`+table+`]', 'U') IS NOT NULL DROP TABLE [`+appSchema+`].[`+table+`]`)
+		}
+		statements = append(statements,
+			`IF SCHEMA_ID('`+appSchema+`') IS NOT NULL EXEC('DROP SCHEMA [`+appSchema+`]')`)
 		for _, table := range tables {
 			statements = append(statements, `IF OBJECT_ID('[`+table+`]', 'U') IS NOT NULL DROP TABLE [`+table+`]`)
 		}

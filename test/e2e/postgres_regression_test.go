@@ -95,8 +95,10 @@ func TestCompatConcurrentFlywayAndGoflyExecuteOnce(t *testing.T) {
 		if target.Dialect != lib.DialectPostgres {
 			t.Skip("PostgreSQL advisory locking")
 		}
-		for _, first := range []string{"flyway", "gofly"} {
-			t.Run(first, func(t *testing.T) { runConcurrentHistory(t, target, first, false) })
+		for mode, args := range flywayLockModes() {
+			for _, first := range []string{"flyway", "gofly"} {
+				t.Run(mode+"/"+first, func(t *testing.T) { runConcurrentHistory(t, target, first, false, args) })
+			}
 		}
 	})
 }
@@ -109,8 +111,10 @@ func TestCompatConcurrentFirstMigrationWithSharedHistory(t *testing.T) {
 		if target.Dialect != lib.DialectPostgres {
 			t.Skip("PostgreSQL advisory locking")
 		}
-		for _, first := range []string{"flyway", "gofly"} {
-			t.Run(first, func(t *testing.T) { runConcurrentHistory(t, target, first, true) })
+		for mode, args := range flywayLockModes() {
+			for _, first := range []string{"flyway", "gofly"} {
+				t.Run(mode+"/"+first, func(t *testing.T) { runConcurrentHistory(t, target, first, true, args) })
+			}
 		}
 	})
 }
@@ -118,7 +122,7 @@ func TestCompatConcurrentFirstMigrationWithSharedHistory(t *testing.T) {
 // -----------------------------------------------------------------------------
 // runConcurrentHistory
 // -----------------------------------------------------------------------------
-func runConcurrentHistory(t *testing.T, target Target, first string, fresh bool) {
+func runConcurrentHistory(t *testing.T, target Target, first string, fresh bool, flywayArgs []string) {
 	t.Helper()
 	w := NewWorkspace(t, target)
 	w.Write("V1__base.sql", "CREATE TABLE e2e_users(id int); CREATE SEQUENCE e2e_attempts;")
@@ -138,7 +142,7 @@ func runConcurrentHistory(t *testing.T, target Target, first string, fresh bool)
 	}
 	defer observer.Close()
 	runFlyway := func() error {
-		output, ok := w.RunFlyway(postgresFlywayArgs()...)
+		output, ok := w.RunFlyway(flywayArgs...)
 		if !ok {
 			return &flywayRunError{output}
 		}
@@ -191,6 +195,21 @@ type flywayRunError struct{ output string }
 // Error
 // -----------------------------------------------------------------------------
 func (e *flywayRunError) Error() string { return e.output }
+
+// -----------------------------------------------------------------------------
+// flywayLockModes
+//
+// Flyway's default PostgreSQL lock is taken inside each migration transaction,
+// the other one for the whole session. gofly has to serialize against both.
+// Flyway 6 only has the session lock and no option to choose.
+// -----------------------------------------------------------------------------
+func flywayLockModes() map[string][]string {
+	modes := map[string][]string{"default_lock": {"migrate"}}
+	if os.Getenv("GOFLY_E2E_FLYWAY_LEGACY") != "1" {
+		modes["session_lock"] = []string{"-postgresql.transactional.lock=false", "migrate"}
+	}
+	return modes
+}
 
 // -----------------------------------------------------------------------------
 // postgresFlywayArgs

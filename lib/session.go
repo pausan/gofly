@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Pau Sanchez
 //
-// PostgreSQL session state and advisory locks must stay on one physical connection.
+// PostgreSQL session state and advisory locks, and MySQL's USE, must stay on one
+// physical connection.
 package lib
 
 import (
@@ -48,7 +49,8 @@ func (p pinnedDatabase) Begin() (*sql.Tx, error) { return p.conn.BeginTx(context
 // pinSession
 // -----------------------------------------------------------------------------
 func (c *Connection) pinSession() error {
-	if c.Dialect().Name() != DialectPostgres || c.session != nil {
+	name := c.Dialect().Name()
+	if (name != DialectPostgres && name != DialectMysql) || c.session != nil {
 		return nil
 	}
 	conn, err := c.db.Conn(context.Background())

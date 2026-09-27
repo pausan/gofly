@@ -76,7 +76,7 @@ variables all work. See [configuration.md](configuration.md); note that the
 
 ## Taking over from Flyway
 
-An existing Flyway history is now reused as the writable history by default.
+An existing Flyway history is reused as the writable history by default.
 Both tools then see the same applied migrations, so switching back does not replay
 changes. On PostgreSQL they also use compatible advisory locks on that history.
 The application schema and search path stay unchanged. For a brand-new database
@@ -97,13 +97,18 @@ schema. For example, a private history in `public.gofly_schema_history` is used
 by gofly with `--goflySchema=public` and Flyway with
 `-table=gofly_schema_history`; this avoids changing the schema for unqualified SQL.
 
-If both private and Flyway histories already exist, the default refuses to guess
-which is authoritative. Reconcile them and explicitly configure one shared table,
-or retain solo private-history operation with `--reuseFlywayHistory=false`.
-Disabling `--importFromFlyway` disables both reuse and import.
+Databases taken over by an earlier gofly have both tables: gofly's own, and the
+Flyway one it was imported from. When every row of the Flyway table is also in
+gofly's, the Flyway table is just that older copy, and gofly carries on with its
+own history and says so. If Flyway has run since, so that each table holds
+migrations the other lacks, gofly refuses to guess which is authoritative.
+Reconcile them and explicitly configure one shared table, or retain solo
+private-history operation with `--reuseFlywayHistory=false`. Disabling
+`--importFromFlyway` disables both reuse and import.
 
 `info` and `validate` remain read-only: they do not create or import history and
-can validate against an existing Flyway table before takeover.
+can validate against an existing Flyway table before takeover. They pick the
+history table the same way `migrate` does, and refuse the same ambiguity.
 
 ## Where gofly differs on purpose
 
@@ -112,6 +117,7 @@ can validate against an existing Flyway table before takeover.
 | History table | `flyway_schema_history` in the default schema | Reuses an existing Flyway history; otherwise creates `gofly_schema_history` | Sharing one history prevents migration replay during handover |
 | Undo | Teams edition only | included | It is a small feature and a useful one |
 | `--group` | Teams edition only | included | All-or-nothing is the behaviour most people expect |
+| `REINDEX INDEX/TABLE CONCURRENTLY` | Sent inside a transaction, which PostgreSQL refuses | Runs outside a transaction | PostgreSQL requires it, and the history it leaves is one Flyway could have written |
 | Encoding | `--encoding`, `--detectEncoding` | always UTF-8 | Anything else in a migration in 2026 is a bug worth fixing at the source |
 
 ## Deliberately left out

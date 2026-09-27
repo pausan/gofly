@@ -18,6 +18,10 @@ type Statement struct {
 	Line       int
 	CopyData   *string
 	ParseError string
+
+	// Batch counts the SQL Server GO separators before the statement. Flyway
+	// parses a whole batch as one statement, which matters for transactions.
+	Batch int
 }
 
 // scanFlavour captures the few lexical differences between the databases we
@@ -54,6 +58,7 @@ func SplitStatements(sql string, dialect string) []Statement {
 	line := 1
 	statementLine := 1
 	delimiter := ";"
+	batch := 0
 
 	runes := []rune(sql)
 	index := 0
@@ -63,7 +68,7 @@ func SplitStatements(sql string, dialect string) []Statement {
 		text := strings.TrimSpace(current.String())
 		current.Reset()
 		if text != "" && !isCommentOnly(text, flavour.dollarQuoted || flavour.batchSeparator != "") {
-			statements = append(statements, Statement{SQL: text, Line: statementLine})
+			statements = append(statements, Statement{SQL: text, Line: statementLine, Batch: batch})
 		}
 		statementLine = line
 	}
@@ -134,6 +139,7 @@ func SplitStatements(sql string, dialect string) []Statement {
 		// ---- SQL Server GO batch separator --------------------------------
 		if flavour.batchSeparator != "" && atLineStart(current.String()) && isStandaloneGo(runes, index) {
 			flush()
+			batch++
 			for index < len(runes) && runes[index] != '\n' {
 				index++
 			}

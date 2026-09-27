@@ -43,9 +43,14 @@ gofly --url=jdbc:postgresql://localhost:5432/mydb --user=admin --password=secret
       --locations=filesystem:./sql migrate
 ```
 
-A nonempty schema without migration history is refused unless you explicitly
-baseline it or enable `baselineOnMigrate`. Disabling the Flyway import does not
-disable this safeguard.
+A nonempty schema without migration history is refused, with Flyway's message,
+unless you explicitly baseline it, enable `baselineOnMigrate` or
+`skipExecutingMigrations`. What counts as nonempty is Flyway's rule for each
+database: PostgreSQL ignores objects owned by an extension, and SQLite only
+counts tables. Disabling the Flyway import does not disable this safeguard.
+
+Configured schemas that do not exist yet are created. When that happens together
+with a new history table, a `SCHEMA` row is recorded at rank 0, as Flyway does.
 
 ### `undo`
 

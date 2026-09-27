@@ -266,3 +266,12 @@ func TestSplitCopyPayloadIsNotParsedAsSQL(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestSplitKeepsSQLAfterNonnestingDialectComments
+// -----------------------------------------------------------------------------
+func TestSplitKeepsSQLAfterNonnestingDialectComments(t *testing.T) {
+	for _, dialect := range []string{DialectSqlite, DialectMysql} {
+		assertStatements(t, "/* outer /* text */ SELECT 1;", dialect, []string{"/* outer /* text */ SELECT 1"})
+	}
+}

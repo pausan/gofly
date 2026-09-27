@@ -62,7 +62,7 @@ func SplitStatements(sql string, dialect string) []Statement {
 	flush := func() {
 		text := strings.TrimSpace(current.String())
 		current.Reset()
-		if text != "" && !isCommentOnly(text) {
+		if text != "" && !isCommentOnly(text, flavour.dollarQuoted || flavour.batchSeparator != "") {
 			statements = append(statements, Statement{SQL: text, Line: statementLine})
 		}
 		statementLine = line
@@ -400,7 +400,7 @@ func isStandaloneGo(runes []rune, index int) bool {
 // Reports whether a fragment carries no executable SQL, so that a trailing
 // comment after the last semicolon is not sent to the database.
 // -----------------------------------------------------------------------------
-func isCommentOnly(text string) bool {
+func isCommentOnly(text string, nested bool) bool {
 	stripped := strings.Builder{}
 
 	runes := []rune(text)
@@ -413,7 +413,7 @@ func isCommentOnly(text string) bool {
 		}
 
 		if runes[index] == '/' && index+1 < len(runes) && runes[index+1] == '*' {
-			index = readBlockComment(runes, index, true)
+			index = readBlockComment(runes, index, nested)
 			continue
 		}
 

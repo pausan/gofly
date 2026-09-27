@@ -449,7 +449,7 @@ func (g *Gofly) Migrate() (*MigrateResult, error) {
 func (g *Gofly) migrateGrouped(pending []*MigrationInfo, rank int, result *MigrateResult) error {
 	g.warnIfNoDDLTransactions()
 
-	transaction, err := g.Connection.DB().Begin()
+	transaction, err := g.Connection.beginMigration()
 	if err != nil {
 		return err
 	}
@@ -491,7 +491,7 @@ func (g *Gofly) migrateOneByOne(pending []*MigrationInfo, rank int, result *Migr
 	for _, info := range pending {
 		migration := info.Resolved
 
-		transaction, err := g.Connection.DB().Begin()
+		transaction, err := g.Connection.beginMigration()
 		if err != nil {
 			return err
 		}
@@ -554,7 +554,20 @@ func (g *Gofly) executeMigration(executor sqlExecutor, migration *ResolvedMigrat
 	}
 
 	for _, statement := range SplitStatements(sql, g.Connection.Dialect().Name()) {
-		if _, err := executor.Exec(statement.SQL); err != nil {
+		var err error
+		if statement.ParseError != "" {
+			err = errors.New(statement.ParseError)
+		} else if statement.CopyData != nil {
+			copier, ok := executor.(interface{ copyFrom(string, string) error })
+			if !ok {
+				err = fmt.Errorf("COPY requires a migration connection")
+			} else {
+				err = copier.copyFrom(statement.SQL, *statement.CopyData)
+			}
+		} else {
+			_, err = executor.Exec(statement.SQL)
+		}
+		if err != nil {
 			return int(time.Since(started).Milliseconds()),
 				fmt.Errorf("line %d: %w", statement.Line, err)
 		}
@@ -720,7 +733,7 @@ func (g *Gofly) Undo() (*UndoResult, error) {
 func (g *Gofly) undoGrouped(resolved *ResolvedMigrations, toUndo []*MigrationInfo, rank int, result *UndoResult) error {
 	g.warnIfNoDDLTransactions()
 
-	transaction, err := g.Connection.DB().Begin()
+	transaction, err := g.Connection.beginMigration()
 	if err != nil {
 		return err
 	}
@@ -754,7 +767,7 @@ func (g *Gofly) undoOneByOne(resolved *ResolvedMigrations, toUndo []*MigrationIn
 	for _, info := range toUndo {
 		undo := resolved.UndoFor(info.Version())
 
-		transaction, err := g.Connection.DB().Begin()
+		transaction, err := g.Connection.beginMigration()
 		if err != nil {
 			return err
 		}

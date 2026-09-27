@@ -172,3 +172,8 @@ describe the state you want and run `migrate`.
 
 Undo is a Flyway Teams feature, so the community edition cannot be compared
 against here. gofly implements it for everyone.
+
+PostgreSQL `COPY ... FROM STDIN` migrations accept inline text or CSV data ending
+with a standalone `\.` line. Payloads use the PostgreSQL COPY protocol on the
+migration connection, so they roll back with transactional migrations. A missing
+terminator is rejected before sending COPY to the server.

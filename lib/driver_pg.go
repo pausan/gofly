@@ -20,5 +20,25 @@
 package lib
 
 import (
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"context"
+	"database/sql"
+	"fmt"
+	"github.com/jackc/pgx/v5/stdlib"
+	"strings"
 )
+
+// -----------------------------------------------------------------------------
+// init
+// -----------------------------------------------------------------------------
+func init() {
+	postgresCopyFrom = func(conn *sql.Conn, statement, data string) error {
+		return conn.Raw(func(raw any) error {
+			pg, ok := raw.(*stdlib.Conn)
+			if !ok {
+				return fmt.Errorf("COPY requires a PostgreSQL connection")
+			}
+			_, err := pg.Conn().PgConn().CopyFrom(context.Background(), strings.NewReader(data), statement)
+			return err
+		})
+	}
+}

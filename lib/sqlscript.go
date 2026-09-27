@@ -14,8 +14,10 @@ import (
 // Statement is a single executable statement together with the line it starts
 // at, so that errors can be reported the way Flyway does.
 type Statement struct {
-	SQL  string
-	Line int
+	SQL        string
+	Line       int
+	CopyData   *string
+	ParseError string
 }
 
 // scanFlavour captures the few lexical differences between the databases we
@@ -140,8 +142,18 @@ func SplitStatements(sql string, dialect string) []Statement {
 
 		// ---- statement delimiter ------------------------------------------
 		if matchesLiteral(runes, index, delimiter) {
+			copyInput := flavour.dollarQuoted && postgresCopyStdin(current.String())
 			index += len([]rune(delimiter))
 			flush()
+			if copyInput {
+				start := index
+				end, data, message := readCopyPayload(runes, index)
+				index = end
+				line += strings.Count(string(runes[start:end]), "\n")
+				statements[len(statements)-1].CopyData = &data
+				statements[len(statements)-1].ParseError = message
+				statementLine = line
+			}
 			continue
 		}
 
@@ -153,7 +165,14 @@ func SplitStatements(sql string, dialect string) []Statement {
 	}
 
 	flush()
-
+	if flavour.dollarQuoted {
+		for index := range statements {
+			statement := &statements[index]
+			if statement.CopyData == nil && postgresCopyStdin(statement.SQL) {
+				statement.ParseError = "COPY FROM STDIN requires a semicolon and terminated input data"
+			}
+		}
+	}
 	return statements
 }
 
@@ -446,4 +465,35 @@ func readBlockComment(runes []rune, start int, nested bool) int {
 		index++
 	}
 	return len(runes)
+}
+
+// -----------------------------------------------------------------------------
+// readCopyPayload
+//
+// COPY data is not SQL: semicolons, comments and quote characters are data until
+// the standalone backslash-dot terminator. Missing terminators fail locally.
+// -----------------------------------------------------------------------------
+func readCopyPayload(runes []rune, index int) (int, string, string) {
+	for index < len(runes) && (runes[index] == ' ' || runes[index] == '\t' || runes[index] == '\r') {
+		index++
+	}
+	if index >= len(runes) || runes[index] != '\n' {
+		return len(runes), "", "COPY FROM STDIN requires data on the following line and a \\. terminator"
+	}
+	index++
+	start := index
+	for index < len(runes) {
+		lineStart := index
+		for index < len(runes) && runes[index] != '\n' {
+			index++
+		}
+		line := strings.TrimSuffix(string(runes[lineStart:index]), "\r")
+		if index < len(runes) {
+			index++
+		}
+		if line == `\.` {
+			return index, string(runes[start:lineStart]), ""
+		}
+	}
+	return index, "", "COPY FROM STDIN is missing its \\. terminator"
 }

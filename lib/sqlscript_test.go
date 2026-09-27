@@ -244,3 +244,25 @@ func TestSplitKeepsNestedPostgresCommentsIntact(t *testing.T) {
 	assertStatements(t, statement+"; SELECT 2;", DialectPostgres, []string{statement, "SELECT 2"})
 	assertStatements(t, "/* outer /* inner */ ; ignored */", DialectPostgres, []string{})
 }
+
+// -----------------------------------------------------------------------------
+// TestSplitCopyPayloadIsNotParsedAsSQL
+// -----------------------------------------------------------------------------
+func TestSplitCopyPayloadIsNotParsedAsSQL(t *testing.T) {
+	statements := SplitStatements("COPY events FROM STDIN;\r\nhello;world\r\n/* data */\r\n\\.\r\nSELECT 2;", DialectPostgres)
+	if len(statements) != 2 {
+		t.Fatalf("got %d statements", len(statements))
+	}
+	if statements[0].CopyData == nil || *statements[0].CopyData != "hello;world\r\n/* data */\r\n" {
+		t.Fatalf("lost COPY data: %+v", statements[0])
+	}
+	if statements[1].SQL != "SELECT 2" {
+		t.Errorf("lost statement after COPY: %+v", statements[1])
+	}
+	for _, script := range []string{"COPY events FROM STDIN;\nmissing terminator\n", "COPY events FROM STDIN"} {
+		statements = SplitStatements(script, DialectPostgres)
+		if statements[0].ParseError == "" {
+			t.Errorf("malformed COPY was accepted: %q", script)
+		}
+	}
+}

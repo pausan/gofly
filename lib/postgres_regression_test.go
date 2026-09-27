@@ -243,3 +243,68 @@ func TestPostgresMigratesNestedComments(t *testing.T) {
 		t.Errorf("got %d", value)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestPostgresCopyFromStdinLoadsDataAndContinues
+// -----------------------------------------------------------------------------
+func TestPostgresCopyFromStdinLoadsDataAndContinues(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v text);\nCOPY events FROM STDIN;\nhello;world\n--data\n\\.\nINSERT INTO events VALUES('after');"})
+	result := make(chan error, 1)
+	go func() { _, err := g.Migrate(); result <- err }()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		// Kill only sessions in this test's private database so the regression
+		// fails promptly even when the driver waits indefinitely for COPY input.
+		killer, err := Connect(g.Config.URL, g.Config.User, g.Config.Password, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = killer.DB().Exec("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()")
+		killer.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-result
+		t.Fatal("COPY FROM STDIN hung instead of consuming its payload")
+	}
+	var rows int
+	if err := g.Connection.DB().QueryRow("SELECT count(*) FROM events").Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 3 {
+		t.Errorf("copied %d rows, want 3", rows)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestPostgresCopyFailureRollsBackDDLAndData
+// -----------------------------------------------------------------------------
+func TestPostgresCopyFailureRollsBackDDLAndData(t *testing.T) {
+	for _, group := range []bool{false, true} {
+		t.Run(fmt.Sprint(group), func(t *testing.T) {
+			g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int PRIMARY KEY);\nCOPY events FROM STDIN;\n1\n1\n\\.\n"})
+			g.Config.Group = group
+			if _, err := g.Migrate(); err == nil {
+				t.Fatal("duplicate COPY input should fail")
+			}
+			var exists bool
+			if err := g.Connection.DB().QueryRow("SELECT to_regclass('events') IS NOT NULL").Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if exists {
+				t.Fatal("failed COPY left application DDL behind")
+			}
+			rows, err := g.History.All()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 0 {
+				t.Fatal("failed transactional COPY was recorded")
+			}
+		})
+	}
+}

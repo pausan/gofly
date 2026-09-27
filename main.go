@@ -13,8 +13,10 @@ import (
 	"github.com/pausan/gofly/lib"
 )
 
-// Version of gofly itself
-const Version = "0.1.3"
+// Version of gofly itself. Left as "dev" in the source: the Makefile replaces it
+// at link time with -X main.Version, taken from the git tag, so a release is
+// never out of step with the tag it was built from.
+var Version = "dev"
 
 // -----------------------------------------------------------------------------
 // main

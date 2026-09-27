@@ -111,15 +111,12 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Releasing $version"
 
-      - name: Check the version matches main.go
+      - name: Check the version looks like one
         run: |
-          declared="v$(grep -oP 'const Version = "\K[^"]+' main.go)"
-          asked="${{ steps.version.outputs.version }}"
-          if [ "$declared" != "$asked" ]; then
-            echo "main.go declares $declared but the release asks for $asked."
-            echo "Update 'const Version' in main.go and commit before releasing."
+          echo "${{ steps.version.outputs.version }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+' || {
+            echo "Expected a version like v0.2.0, got ${{ steps.version.outputs.version }}"
             exit 1
-          fi
+          }
 
       - name: Install upx
         run: |
@@ -128,7 +125,8 @@ jobs:
           upx --version | head -1
 
       - name: Cross compile and pack
-        run: make release-all
+        # main.go only says "dev", the version comes from the tag
+        run: make release-all VERSION=${{ steps.version.outputs.version }}
 
       - name: Checksums
         run: |

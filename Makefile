@@ -3,8 +3,12 @@
 #
 BINARY      ?= gofly
 BUILD_DIR   ?= build
-VERSION_IN_SOURCE ?= $(shell grep -oP 'const Version = "\K[^"]+' main.go)
-VERSION           ?=
+
+# the version baked into the binary, with the leading v. Defaults to whatever
+# git describe says (v0.1.2 on a tag, v0.1.2-3-gabc1234 past one), or dev
+# outside a checkout. The release workflow passes the tag explicitly.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION_LDFLAGS = -X main.Version=$(patsubst v%,%,$(VERSION))
 
 # -s -w drop the symbol table and DWARF, which is the go equivalent of strip.
 # -trimpath keeps build machine paths out of the binary and makes the output
@@ -90,19 +94,19 @@ all: lint test build
 ## build: compile for the host platform
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) .
-	@echo "built $(BUILD_DIR)/$(BINARY) $(VERSION_IN_SOURCE)"
+	go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) .
+	@echo "built $(BUILD_DIR)/$(BINARY) $(VERSION)"
 
 ## build-all: cross compile for linux, macos and windows, plus the linux only
 ##            single database builds
 build-all: build-single
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux   GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-amd64 .
-	GOOS=linux   GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-arm64 .
-	GOOS=darwin  GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 .
-	GOOS=darwin  GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 .
-	GOOS=windows GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe .
-	GOOS=windows GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe .
+	GOOS=linux   GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-amd64 .
+	GOOS=linux   GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-arm64 .
+	GOOS=darwin  GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-amd64 .
+	GOOS=darwin  GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 .
+	GOOS=windows GOARCH=amd64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe .
+	GOOS=windows GOARCH=arm64 go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe .
 	@ls -lh $(BUILD_DIR)/
 
 ## build-single: the linux only builds that carry a single database driver
@@ -111,7 +115,7 @@ build-single:
 	@for db in $(SINGLE_DBS); do \
 	  for arch in $(SINGLE_ARCHS); do \
 	    out="$(BUILD_DIR)/$(BINARY).$$db-linux-$$arch"; \
-	    GOOS=linux GOARCH=$$arch go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS)" \
+	    GOOS=linux GOARCH=$$arch go build $(GOBUILD_FLAGS) -ldflags "$(LDFLAGS) $(VERSION_LDFLAGS)" \
 	      -tags "goflymin,db_$$db" -o "$$out" . || exit 1; \
 	    echo "built $$out"; \
 	  done; \
@@ -142,13 +146,8 @@ release-all: build-all compress
 ## release: publish a github release from this commit (needs the gh cli)
 ##          usage: make release VERSION=v0.2.0
 release:
-	@test -n "$(VERSION)" || { echo "usage: make release VERSION=v0.2.0"; exit 1; }
-	@declared="v$(VERSION_IN_SOURCE)"; \
-	if [ "$$declared" != "$(VERSION)" ]; then \
-	  echo "main.go declares $$declared but you asked for $(VERSION)."; \
-	  echo "Update 'const Version' in main.go, commit, then try again."; \
-	  exit 1; \
-	fi
+	@test "$(origin VERSION)" != "file" || { echo "usage: make release VERSION=v0.2.0"; exit 1; }
+	@echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+' || { echo "usage: make release VERSION=v0.2.0"; exit 1; }
 	gh workflow run release.yml -f version=$(VERSION)
 	@echo "release workflow started; watch it with: gh run watch"
 

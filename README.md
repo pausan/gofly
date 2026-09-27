@@ -247,7 +247,9 @@ is always a manual decision:
 make release VERSION=v0.2.0
 ```
 
-or run the Release workflow from the Actions tab. Either way it re-runs
+or push a `v*` tag, or run the Release workflow from the Actions tab. There is
+no version to bump in the source: `main.go` says `dev`, and the build stamps
+the release version into the binary. Either way it re-runs
 everything, then uploads binaries for Linux, macOS and Windows on x86-64 and
 ARM64, with a `SHA256SUMS` file.
 

@@ -542,7 +542,7 @@ func TestCompatFlywayCanReadWhatGoflyWrote(t *testing.T) {
 
 		args := []string{"-table=" + lib.DefaultGoflyTable}
 		if schema := historySchemaFor(target); schema != "" {
-			args = append(args, "-defaultSchema="+schema)
+			args = append(args, "-defaultSchema="+schema, "-schemas="+schema)
 		}
 		args = append(args, "info")
 

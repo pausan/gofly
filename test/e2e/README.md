@@ -46,6 +46,9 @@ export GOFLY_E2E_PG_PASSWORD=goflypass
 go test -tags e2e ./test/e2e/ -v
 ```
 
+`GOFLY_E2E_FLYWAY_LEGACY=1` omits the PostgreSQL transactional-lock option
+when testing Flyway 6.x.
+
 `GOFLY_E2E_SKIP_SQLITE=1` leaves SQLite out. `GOFLY_E2E_FLYWAY_IMAGE` pins a
 different Flyway version, which is how you check gofly against a newer release.
 
@@ -65,7 +68,12 @@ different Flyway version, which is how you check gofly against a newer release.
 | placeholders, and the checksum staying stable | yes |
 | a failed migration and what it leaves behind | yes |
 | repair, then migrating the fixed migration | yes |
-| handover: Flyway migrates, gofly imports and continues | yes |
+| explicit separate-history import from Flyway | yes |
+| shared-history Flyway → gofly → Flyway round trip | yes |
+| concurrent PostgreSQL Flyway/gofly runners, both start orders | yes |
+| PostgreSQL E-strings, COPY FROM STDIN, concurrent indexes, VACUUM | yes |
+| nontransactional per-script configuration | yes |
+| baselineOnMigrate on an empty database | yes |
 | Flyway reading the history gofly wrote | yes |
 | validate against a database still managed by Flyway | yes |
 | undo, and re-applying afterwards | gofly only, undo is a Teams feature |

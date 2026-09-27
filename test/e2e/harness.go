@@ -155,6 +155,7 @@ func NewWorkspace(t *testing.T, target Target) *Workspace {
 	}
 
 	workspace.Reset()
+	t.Cleanup(workspace.Reset)
 
 	return workspace
 }

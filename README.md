@@ -147,7 +147,10 @@ gofly info --url=mysql://localhost:3306/artypistdb --user=myuser --pass=mypass
 An existing Flyway history is now reused as the writable history by default.
 Both tools then see the same applied migrations, so switching back does not replay
 changes. On PostgreSQL they also use compatible advisory locks on that history.
-The application schema and search path stay unchanged.
+The application schema and search path stay unchanged. For a brand-new database
+where both tools may start concurrently, configure gofly with
+`--goflySchema=public --goflyTable=flyway_schema_history` from the outset so both
+tools create and use the same history.
 
 Use `--reuseFlywayHistory=false` for a separate-history import. This copies
 checksums, installation timestamps and other history fields into gofly's own

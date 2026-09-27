@@ -611,3 +611,66 @@ func TestPostgresRefusesToGuessBetweenExistingHistories(t *testing.T) {
 		t.Fatal("ambiguous history caused data changes")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestPostgresSessionLossAbortsRatherThanReconnectingWithoutALock
+// -----------------------------------------------------------------------------
+func TestPostgresSessionLossAbortsRatherThanReconnectingWithoutALock(t *testing.T) {
+	g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE events(v int);"})
+	if _, err := g.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(g.Config.Locations[0]+"/V2__slow.sql", []byte("INSERT INTO events VALUES(2); SELECT pg_sleep(0.5);"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if err := g.Connection.sessionDB().QueryRow("SELECT pg_backend_pid()").Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := g.Migrate(); done <- err }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var sleeping bool
+		if err := g.Connection.DB().QueryRow("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND state='active' AND query LIKE '%pg_sleep%')", pid).Scan(&sleeping); err != nil {
+			t.Fatal(err)
+		}
+		if sleeping {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("migration did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := g.Connection.DB().Exec("SELECT pg_terminate_backend($1)", pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("terminated migration reported success")
+	}
+	var rows int
+	if err := g.Connection.DB().QueryRow("SELECT count(*) FROM public.events").Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatal("terminated transaction committed data")
+	}
+	if _, err := g.Migrate(); err == nil {
+		t.Fatal("broken pinned session silently reconnected")
+	}
+	peer, err := New(g.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	if _, err := peer.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := peer.Connection.DB().QueryRow("SELECT count(*) FROM public.events").Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("retry left %d rows", rows)
+	}
+}

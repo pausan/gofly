@@ -43,6 +43,10 @@ gofly --url=jdbc:postgresql://localhost:5432/mydb --user=admin --password=secret
       --locations=filesystem:./sql migrate
 ```
 
+A nonempty schema without migration history is refused unless you explicitly
+baseline it or enable `baselineOnMigrate`. Disabling the Flyway import does not
+disable this safeguard.
+
 ### `undo`
 
 Undoes the most recently applied versioned migration, provided a `U`-prefixed

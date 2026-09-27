@@ -376,6 +376,9 @@ type MigrateResult struct {
 // completely untouched.
 // -----------------------------------------------------------------------------
 func (g *Gofly) Migrate() (*MigrateResult, error) {
+	if err := g.checkUnmanagedSchema(); err != nil {
+		return nil, err
+	}
 	if err := g.EnsureHistory(); err != nil {
 		return nil, err
 	}

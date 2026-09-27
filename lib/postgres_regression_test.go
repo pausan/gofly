@@ -130,3 +130,30 @@ func TestPostgresImportFailureIsAtomicAndRetryDoesNotReplay(t *testing.T) {
 		t.Errorf("retry replayed data: got %d rows, want 2", rows)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestPostgresRefusesNonemptySchemaWithoutHistory
+// -----------------------------------------------------------------------------
+func TestPostgresRefusesNonemptySchemaWithoutHistory(t *testing.T) {
+	for _, object := range []string{
+		"CREATE TABLE existing(v int); INSERT INTO existing VALUES(1)",
+		"CREATE VIEW existing AS SELECT 1 AS v",
+		"CREATE TYPE existing AS ENUM ('one')",
+		"CREATE FUNCTION existing() RETURNS int LANGUAGE SQL AS 'SELECT 1'",
+	} {
+		t.Run(object, func(t *testing.T) {
+			g := newPostgresRegression(t, map[string]string{"V1__base.sql": "CREATE TABLE unexpected(v int);"})
+			regressionExec(t, g, object)
+			if _, err := g.Migrate(); err == nil {
+				t.Fatal("nonempty unmanaged schema must require a baseline")
+			}
+			exists, err := g.History.Exists()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if exists {
+				t.Error("refused migration created history")
+			}
+		})
+	}
+}

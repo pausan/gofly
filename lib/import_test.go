@@ -208,6 +208,9 @@ func TestImportCanBeTurnedOff(t *testing.T) {
 		flywayRow(1, "1", "a", "V1__a.sql", ChecksumString(firstSQL)),
 	})
 	setup.config.ImportFromFlyway = false
+	// Disabling import does not authorize migrating an unmanaged schema.
+	setup.config.BaselineOnMigrate = true
+	setup.config.BaselineVersion = "0"
 
 	result := setup.mustMigrate()
 	if result.MigrationsExecuted != 1 {

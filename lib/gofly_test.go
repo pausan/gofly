@@ -702,3 +702,27 @@ func TestMigrateRollsBackAFailingStatementWithinOneMigration(t *testing.T) {
 		t.Error("the first statement must have been rolled back with the rest")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestMigrateRefusesToChangeAnUnmanagedDatabase
+// -----------------------------------------------------------------------------
+func TestMigrateRefusesToChangeAnUnmanagedDatabase(t *testing.T) {
+	setup := newTestSetup(t)
+	mustExec(t, setup.dbPath, "CREATE TABLE existing(v int); INSERT INTO existing VALUES(1)")
+	setup.write("V1__change.sql", "UPDATE existing SET v=999;")
+	if _, err := setup.migrate(); err == nil {
+		t.Fatal("unmanaged schema must be refused")
+	}
+	rows := setup.query("SELECT v FROM existing")
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("missing data")
+	}
+	var value int
+	if err := rows.Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != 1 {
+		t.Errorf("unmanaged data changed to %d", value)
+	}
+}

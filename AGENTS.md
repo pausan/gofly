@@ -276,3 +276,5 @@ When working on this codebase, adhere to the following principles:
     precisely. Avoid overly formal, complex, or elaborate wording. Prefer common
     words, concise sentences, and concrete explanations. Prioritize clarity over
     sounding sophisticated.
+6.  **Commits.** Unless asked not to, commit each self-contained change as you finish.
+    Small, regular, descriptive. No AI tool mentions in commit messages. Never push.

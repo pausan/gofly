@@ -2,6 +2,7 @@
 package lib
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -196,21 +197,37 @@ func TestSplitGoIsOnlyABatchSeparatorOnItsOwnLine(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// TestSplitReportsLineNumbers
+// TestSplitReportsTheLineEachStatementStartsOn
+//
+// Flyway reports the line of a statement's first token that is not a comment,
+// not the line of the delimiter before it, and error messages point there.
 // -----------------------------------------------------------------------------
-func TestSplitReportsLineNumbers(t *testing.T) {
-	sql := "SELECT 1;\n\n\nSELECT 2;\n"
+func TestSplitReportsTheLineEachStatementStartsOn(t *testing.T) {
+	cases := []struct {
+		name    string
+		sql     string
+		dialect string
+		lines   []int
+	}{
+		{"blank lines", "SELECT 1;\n\n\nSELECT 2;\n", DialectSqlite, []int{1, 4}},
+		{"same line", "SELECT 1; SELECT 2;\n", DialectSqlite, []int{1, 1}},
+		{"next line", "SELECT 1;\nSELECT 2;\n", DialectPostgres, []int{1, 2}},
+		{"leading comments", "-- first\n/* a\n   b */\nSELECT 1;\n-- second\n\nSELECT 2;\n", DialectPostgres, []int{4, 7}},
+		{"multi-line statement", "CREATE TABLE t (\n  id INT\n);\nSELECT 2;\n", DialectMysql, []int{1, 4}},
+		{"delimiter", "DELIMITER //\nSELECT 1//\nDELIMITER ;\n\nSELECT 2;\n", DialectMysql, []int{2, 5}},
+		{"batch separator", "SELECT 1\nGO\n\nSELECT 2\nGO\n", DialectMssql, []int{1, 4}},
+		{"crlf", "SELECT 1;\r\n\r\nSELECT 2;\r\n", DialectSqlite, []int{1, 3}},
+	}
 
-	statements := SplitStatements(sql, DialectSqlite)
-	if len(statements) != 2 {
-		t.Fatalf("got %d statements", len(statements))
-	}
-	if statements[0].Line != 1 {
-		t.Errorf("first statement starts at line %d, want 1", statements[0].Line)
-	}
-	if statements[1].Line != 1 && statements[1].Line != 2 {
-		// the second statement starts once the first delimiter has been seen
-		t.Logf("second statement reported at line %d", statements[1].Line)
+	for _, c := range cases {
+		statements := SplitStatements(c.sql, c.dialect)
+		lines := []int{}
+		for _, statement := range statements {
+			lines = append(lines, statement.Line)
+		}
+		if fmt.Sprint(lines) != fmt.Sprint(c.lines) {
+			t.Errorf("%s: statements start at lines %v, want %v", c.name, lines, c.lines)
+		}
 	}
 }
 

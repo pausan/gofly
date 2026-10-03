@@ -63,12 +63,17 @@ func SplitStatements(sql string, dialect string) []Statement {
 	runes := []rune(sql)
 	index := 0
 
-	// flush appends whatever has been collected so far as a new statement
+	// flush appends whatever has been collected so far as a new statement.
+	// statementLine is where the collected text begins, usually the line of
+	// the previous delimiter, but Flyway reports the line of the first token
+	// that is not a comment, so the leading blank lines and comments are
+	// counted in.
 	flush := func() {
-		text := strings.TrimSpace(current.String())
+		text := current.String()
 		current.Reset()
-		if text != "" && !isCommentOnly(text, flavour.dollarQuoted || flavour.batchSeparator != "") {
-			statements = append(statements, Statement{SQL: text, Line: statementLine, Batch: batch})
+		skipped, found := leadingComments(text, flavour.dollarQuoted || flavour.batchSeparator != "")
+		if found {
+			statements = append(statements, Statement{SQL: strings.TrimSpace(text), Line: statementLine + skipped, Batch: batch})
 		}
 		statementLine = line
 	}
@@ -401,33 +406,35 @@ func isStandaloneGo(runes []rune, index int) bool {
 }
 
 // -----------------------------------------------------------------------------
-// isCommentOnly
+// leadingComments
 //
-// Reports whether a fragment carries no executable SQL, so that a trailing
-// comment after the last semicolon is not sent to the database.
+// Skips the whitespace and comments a fragment starts with, returning how many
+// lines they span and whether any executable SQL follows. A fragment with none
+// is dropped, so that a trailing comment after the last semicolon is not sent
+// to the database.
 // -----------------------------------------------------------------------------
-func isCommentOnly(text string, nested bool) bool {
-	stripped := strings.Builder{}
-
+func leadingComments(text string, nested bool) (int, bool) {
 	runes := []rune(text)
-	for index := 0; index < len(runes); {
-		if runes[index] == '-' && index+1 < len(runes) && runes[index+1] == '-' {
+	index := 0
+	for index < len(runes) {
+		switch {
+		case runes[index] == '-' && index+1 < len(runes) && runes[index+1] == '-':
 			for index < len(runes) && runes[index] != '\n' {
 				index++
 			}
-			continue
-		}
 
-		if runes[index] == '/' && index+1 < len(runes) && runes[index+1] == '*' {
+		case runes[index] == '/' && index+1 < len(runes) && runes[index+1] == '*':
 			index = readBlockComment(runes, index, nested)
-			continue
-		}
 
-		stripped.WriteRune(runes[index])
-		index++
+		case unicode.IsSpace(runes[index]):
+			index++
+
+		default:
+			return strings.Count(string(runes[:index]), "\n"), true
+		}
 	}
 
-	return strings.TrimSpace(stripped.String()) == ""
+	return 0, false
 }
 
 // -----------------------------------------------------------------------------

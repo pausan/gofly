@@ -47,7 +47,10 @@ func (g *Gofly) sharedHistory() (shared *SchemaHistory, stale *SchemaHistory, er
 		return nil, nil, err
 	}
 	private := NewSchemaHistory(g.Connection, g.historySchema, g.Config.Table, g.Config.ResolveInstalledBy())
-	if private.QualifiedName() == source.QualifiedName() {
+	// MySQL leaves the history schema empty, meaning the session's database,
+	// and the session is pinned to the default schema the Flyway table was
+	// looked up in, so -table=flyway_schema_history names that very table
+	if private.table == source.table && (private.schema == "" || private.schema == source.schema) {
 		return source, nil, nil
 	}
 	exists, err = private.Exists()

@@ -392,3 +392,53 @@ func TestIntegrationImportsAFlywayHistory(t *testing.T) {
 		})
 	}
 }
+
+// -----------------------------------------------------------------------------
+// TestIntegrationTablePointingAtTheFlywayHistoryIsNotAStaleCopy
+//
+// MySQL keeps gofly's history in the migrated database, so -table naming the
+// Flyway table is that very table, not an older copy of it. Only MySQL has an
+// empty history schema; elsewhere the two names point to different schemas.
+// -----------------------------------------------------------------------------
+func TestIntegrationTablePointingAtTheFlywayHistoryIsNotAStaleCopy(t *testing.T) {
+	for _, target := range integrationTargets(t) {
+		if target.name != "mysql" {
+			continue
+		}
+		t.Run(target.name, func(t *testing.T) {
+			files := map[string]string{"V1__Create_a.sql": "CREATE TABLE gofly_a (id INT);\n"}
+			config := integrationConfig(t, target, files)
+			config.ImportFromFlyway = true
+			config.FlywayTable = "gofly_shared_flyway_history"
+			config.Table = config.FlywayTable
+
+			gofly := openIntegration(t, config, []string{"gofly_a", "gofly_b"})
+			if _, err := gofly.Migrate(); err != nil {
+				t.Fatalf("first migrate failed: %v", err)
+			}
+
+			files["V2__Create_b.sql"] = "CREATE TABLE gofly_b (id INT);\n"
+			config.Locations = []string{"filesystem:" + writeFilesInDir(t, files)}
+			config.Quiet = false
+
+			second, err := New(config)
+			if err != nil {
+				t.Fatalf("cannot connect: %v", err)
+			}
+			defer second.Close()
+			output := &strings.Builder{}
+			second.Output = output
+
+			result, err := second.Migrate()
+			if err != nil {
+				t.Fatalf("second migrate failed: %v", err)
+			}
+			if result.MigrationsExecuted != 1 {
+				t.Errorf("applied %d migrations, want only V2", result.MigrationsExecuted)
+			}
+			if strings.Contains(output.String(), "older copy") {
+				t.Errorf("the table was reported as a stale copy of itself:\n%s", output.String())
+			}
+		})
+	}
+}

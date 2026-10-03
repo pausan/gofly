@@ -4,12 +4,15 @@
 package lib
 
 import (
+	"bytes"
 	"database/sql"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // testSetup is a throwaway database plus a directory of migrations
@@ -329,6 +332,48 @@ func TestMigrateRunsNewMigrationsOnly(t *testing.T) {
 	}
 	if !setup.tableExists("b") {
 		t.Error("V2 was not applied")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestMigrateSummaryReportsTheVersionAndTheExecutionTime
+// -----------------------------------------------------------------------------
+func TestMigrateSummaryReportsTheVersionAndTheExecutionTime(t *testing.T) {
+	setup := newTestSetup(t)
+	setup.write("V1__a.sql", "CREATE TABLE a (id INT);\n")
+	setup.write("V2__b.sql", "CREATE TABLE b (id INT);\n")
+	setup.config.Quiet = false
+
+	gofly := setup.open()
+	defer gofly.Close()
+
+	output := &bytes.Buffer{}
+	gofly.Output = output
+
+	if _, err := gofly.Migrate(); err != nil {
+		t.Fatalf("migrate failed: %v", err)
+	}
+
+	summary := regexp.MustCompile(`Successfully applied 2 migration\(s\) to schema \S+, now at version v2 \(execution time \d\d:\d\d\.\d{3}s\)`)
+	if !summary.MatchString(output.String()) {
+		t.Errorf("unexpected summary:\n%s", output.String())
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestFormatExecutionTimeMatchesFlyway
+// -----------------------------------------------------------------------------
+func TestFormatExecutionTimeMatchesFlyway(t *testing.T) {
+	cases := map[time.Duration]string{
+		0:                       "00:00.000s",
+		5 * time.Millisecond:    "00:00.005s",
+		1234 * time.Millisecond: "00:01.234s",
+		61*time.Minute + 2*time.Second + 3*time.Millisecond: "61:02.003s",
+	}
+	for elapsed, want := range cases {
+		if got := formatExecutionTime(elapsed); got != want {
+			t.Errorf("formatExecutionTime(%v) = %s, want %s", elapsed, got, want)
+		}
 	}
 }
 

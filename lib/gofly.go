@@ -464,6 +464,7 @@ func (g *Gofly) migrate() (*MigrateResult, error) {
 		return nil, err
 	}
 
+	started := time.Now()
 	if g.Config.Group {
 		if err := g.migrateGrouped(pending, rank, result); err != nil {
 			return nil, err
@@ -474,10 +475,24 @@ func (g *Gofly) migrate() (*MigrateResult, error) {
 		}
 	}
 
-	g.logf("Successfully applied %d migration(s) to schema %s (execution time %s)",
-		result.MigrationsExecuted, g.defaultSchema, result.TargetVersion)
+	now := ""
+	if result.TargetVersion != "" {
+		now = ", now at version v" + result.TargetVersion
+	}
+	g.logf("Successfully applied %d migration(s) to schema %s%s (execution time %s)",
+		result.MigrationsExecuted, g.defaultSchema, now, formatExecutionTime(time.Since(started)))
 
 	return result, nil
+}
+
+// -----------------------------------------------------------------------------
+// formatExecutionTime
+//
+// Flyway's TimeFormat: minutes, seconds and milliseconds, as in 00:01.234s.
+// -----------------------------------------------------------------------------
+func formatExecutionTime(elapsed time.Duration) string {
+	millis := elapsed.Milliseconds()
+	return fmt.Sprintf("%02d:%02d.%03ds", millis/60000, millis%60000/1000, millis%1000)
 }
 
 // -----------------------------------------------------------------------------

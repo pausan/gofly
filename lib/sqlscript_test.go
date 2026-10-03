@@ -155,6 +155,57 @@ func TestSplitMysqlBackticksAndEscapes(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// TestSplitKeepsMysqlExecutableComments
+//
+// mysqldump emits standalone executable comments. Keep their version guards
+// intact so the server, rather than the splitter, decides whether to run them.
+// -----------------------------------------------------------------------------
+func TestSplitKeepsMysqlExecutableComments(t *testing.T) {
+	assertStatements(t,
+		"-- dump settings\n/*!40101 SET @saved = 'a;b' */;\n/*!99999 SET @future = 1 */;\n/* ordinary; comment */;",
+		DialectMysql,
+		[]string{"-- dump settings\n/*!40101 SET @saved = 'a;b' */", "/*!99999 SET @future = 1 */"},
+	)
+	assertStatements(t,
+		"/*!40101 CREATE */ /*!40101 TABLE `a;b` (id INT) */;\nSELECT /*!40101 SQL_NO_CACHE */ 1;",
+		DialectMysql,
+		[]string{"/*!40101 CREATE */ /*!40101 TABLE `a;b` (id INT) */", "SELECT /*!40101 SQL_NO_CACHE */ 1"},
+	)
+	assertStatements(t,
+		"DELIMITER //\n/*!40101 SET @value = 'a;//b' *///\nDELIMITER ;\nSELECT 1;",
+		DialectMysql,
+		[]string{"/*!40101 SET @value = 'a;//b' */", "SELECT 1"},
+	)
+}
+
+// -----------------------------------------------------------------------------
+// TestSplitRecognisesMysqlHashComments
+// -----------------------------------------------------------------------------
+func TestSplitRecognisesMysqlHashComments(t *testing.T) {
+	assertStatements(t,
+		"# a comment; with quotes ' \" and /*\nSELECT 1 # inline; comment\n;\n# trailer;",
+		DialectMysql,
+		[]string{"# a comment; with quotes ' \" and /*\nSELECT 1 # inline; comment"},
+	)
+	assertStatements(t, "# only a comment;", DialectMysql, []string{})
+	assertStatements(t, "SELECT '#;'; SELECT `#;`;", DialectMysql,
+		[]string{"SELECT '#;'", "SELECT `#;`"})
+	assertStatements(t, "DELIMITER #\nSELECT 1#\nSELECT 2#", DialectMysql,
+		[]string{"SELECT 1", "SELECT 2"})
+}
+
+// -----------------------------------------------------------------------------
+// TestSplitMysqlCommentRulesStayWithinTheMysqlDialect
+// -----------------------------------------------------------------------------
+func TestSplitMysqlCommentRulesStayWithinTheMysqlDialect(t *testing.T) {
+	for _, dialect := range []string{DialectPostgres, DialectMssql, DialectSqlite} {
+		assertStatements(t, "/*!40101 SELECT 1 */;", dialect, []string{})
+		assertStatements(t, "SELECT #value; SELECT 2;", dialect,
+			[]string{"SELECT #value", "SELECT 2"})
+	}
+}
+
+// -----------------------------------------------------------------------------
 // TestSplitMysqlDelimiter
 // -----------------------------------------------------------------------------
 func TestSplitMysqlDelimiter(t *testing.T) {
@@ -217,6 +268,8 @@ func TestSplitReportsTheLineEachStatementStartsOn(t *testing.T) {
 		{"delimiter", "DELIMITER //\nSELECT 1//\nDELIMITER ;\n\nSELECT 2;\n", DialectMysql, []int{2, 5}},
 		{"batch separator", "SELECT 1\nGO\n\nSELECT 2\nGO\n", DialectMssql, []int{1, 4}},
 		{"crlf", "SELECT 1;\r\n\r\nSELECT 2;\r\n", DialectSqlite, []int{1, 3}},
+		{"mysql hash comments", "# first;\r\n/* second */\r\nSELECT 1;\r\n# trailer;", DialectMysql, []int{3}},
+		{"mysql executable comment", "-- first\n\n/*!40101\n SET @value = 1\n */;\nSELECT 2;", DialectMysql, []int{3, 6}},
 	}
 
 	for _, c := range cases {

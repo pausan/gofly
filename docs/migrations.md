@@ -149,8 +149,11 @@ comments, and per dialect:
 
 - **PostgreSQL** — `$$ … $$` and `$tag$ … $tag$` dollar-quoted bodies, so
   functions and `DO` blocks survive intact
-- **MySQL** — backtick identifiers, backslash escapes, and the `DELIMITER`
-  directive for triggers and procedures
+- **MySQL / MariaDB** — backtick identifiers, backslash escapes, `#` line
+  comments, versioned executable comments such as `/*!40101 SET NAMES utf8 */`,
+  and the `DELIMITER` directive for triggers and procedures. Executable comments
+  are sent intact, including standalone statements from dumps, so the server
+  evaluates their version guards. `DELIMITER #` still uses `#` as the delimiter
 - **SQL Server** — `GO` as a batch separator, when alone on its line
 
 ## Undo migrations

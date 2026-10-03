@@ -74,6 +74,15 @@ The flags, the `flyway.conf` properties syntax and the `FLYWAY_*` environment
 variables all work. See [configuration.md](configuration.md); note that the
 `flyway.*` namespace is deprecated in favour of `gofly.*`.
 
+### MySQL comments
+
+MySQL and MariaDB migrations recognise `#` line comments, including semicolons
+inside them. Like Flyway's MySQL parser, `/*!` followed by at least five version
+digits is executable SQL, even when the comment is the entire statement.
+The wrapper is preserved so the server evaluates its version guard. The
+compatibility harness checks both history and resulting data, including dump
+statements that temporarily disable foreign key checks and custom delimiters.
+
 ## Taking over from Flyway
 
 An existing Flyway history is reused as the writable history by default.

@@ -72,6 +72,7 @@ different Flyway version, which is how you check gofly against a newer release.
 | shared-history Flyway → gofly → Flyway round trip | yes |
 | concurrent PostgreSQL Flyway/gofly runners, both start orders | yes |
 | PostgreSQL E-strings, COPY FROM STDIN, concurrent indexes, VACUUM | yes |
+| MySQL executable comments, dump foreign key settings, `#` comments and custom delimiters (history and data) | yes |
 | nontransactional per-script configuration | yes |
 | baselineOnMigrate on an empty database | yes |
 | a non-empty schema refused, with the same message, per database | yes |

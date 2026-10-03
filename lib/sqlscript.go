@@ -41,6 +41,9 @@ type scanFlavour struct {
 
 	// backslashEscapes enables MySQL style \' escaping inside string literals
 	backslashEscapes bool
+
+	// mysqlComments enables # line comments and versioned executable comments
+	mysqlComments bool
 }
 
 // -----------------------------------------------------------------------------
@@ -71,7 +74,7 @@ func SplitStatements(sql string, dialect string) []Statement {
 	flush := func() {
 		text := current.String()
 		current.Reset()
-		skipped, found := leadingComments(text, flavour.dollarQuoted || flavour.batchSeparator != "")
+		skipped, found := leadingComments(text, flavour)
 		if found {
 			statements = append(statements, Statement{SQL: strings.TrimSpace(text), Line: statementLine + skipped, Batch: batch})
 		}
@@ -82,7 +85,8 @@ func SplitStatements(sql string, dialect string) []Statement {
 		char := runes[index]
 
 		// ---- line comment -------------------------------------------------
-		if char == '-' && index+1 < len(runes) && runes[index+1] == '-' {
+		if (char == '-' && index+1 < len(runes) && runes[index+1] == '-') ||
+			(flavour.mysqlComments && char == '#' && !matchesLiteral(runes, index, delimiter)) {
 			for index < len(runes) && runes[index] != '\n' {
 				current.WriteRune(runes[index])
 				index++
@@ -200,6 +204,7 @@ func flavourFor(dialect string) scanFlavour {
 			identifierQuote:   '`',
 			supportsDelimiter: true,
 			backslashEscapes:  true,
+			mysqlComments:     true,
 		}
 
 	case DialectMssql:
@@ -413,18 +418,22 @@ func isStandaloneGo(runes []rune, index int) bool {
 // is dropped, so that a trailing comment after the last semicolon is not sent
 // to the database.
 // -----------------------------------------------------------------------------
-func leadingComments(text string, nested bool) (int, bool) {
+func leadingComments(text string, flavour scanFlavour) (int, bool) {
 	runes := []rune(text)
 	index := 0
 	for index < len(runes) {
 		switch {
-		case runes[index] == '-' && index+1 < len(runes) && runes[index+1] == '-':
+		case (runes[index] == '-' && index+1 < len(runes) && runes[index+1] == '-') ||
+			(flavour.mysqlComments && runes[index] == '#'):
 			for index < len(runes) && runes[index] != '\n' {
 				index++
 			}
 
 		case runes[index] == '/' && index+1 < len(runes) && runes[index+1] == '*':
-			index = readBlockComment(runes, index, nested)
+			if flavour.mysqlComments && mysqlExecutableComment(runes, index) {
+				return strings.Count(string(runes[:index]), "\n"), true
+			}
+			index = readBlockComment(runes, index, flavour.dollarQuoted || flavour.batchSeparator != "")
 
 		case unicode.IsSpace(runes[index]):
 			index++
@@ -435,6 +444,25 @@ func leadingComments(text string, nested bool) (int, bool) {
 	}
 
 	return 0, false
+}
+
+// -----------------------------------------------------------------------------
+// mysqlExecutableComment
+//
+// Flyway's MySQLParser treats /*! followed by five version digits as SQL, even
+// when it is the whole statement. Preserve the wrapper: the server evaluates
+// the version guard, and delimiters inside it must not split the statement.
+// -----------------------------------------------------------------------------
+func mysqlExecutableComment(runes []rune, index int) bool {
+	if index+8 > len(runes) || !matchesLiteral(runes, index, "/*!") {
+		return false
+	}
+	for _, char := range runes[index+3 : index+8] {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // -----------------------------------------------------------------------------

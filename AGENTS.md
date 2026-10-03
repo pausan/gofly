@@ -98,6 +98,13 @@ has created it. Migration SQL, history writes, COPY and advisory locks
 must use that session; the public DB() pool is for independent queries. There is a regression test for this in
 `lib/integration_test.go`; it cannot be reproduced on SQLite.
 
+MySQL's versioned executable comments (`/*!40101 ... */`) are SQL, including
+standalone statements from dumps. Keep their wrappers so the server evaluates
+the version guards. The splitter and its comment-only filtering must agree on
+these and on `#` line comments, while respecting `DELIMITER #`. The MySQL
+compatibility regressions check data as well as history: a silently skipped
+executable comment can still leave a successful history row.
+
 ### 5. Failures are only recorded where the DDL could not be rolled back
 
 `recordFailure` writes a failed row when the engine cannot roll back DDL or
